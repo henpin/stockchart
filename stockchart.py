@@ -41,9 +41,13 @@ TERM2URL_DICT = {"日足":"","前場後場":"a","5分足":"5min","1分足":"minu
 BUTTON_SIZE = (40,30)
 FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
 BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
+#Changed by windows - ダウンロードモードと、サイト設定
 DOWNLOAD_MODE_LOCAL = 1
-DOWNLOAD_MODE_KDB = 2
-DOWNLOAD_MODE_ETC = 3
+DOWNLOAD_MODE_DIFF = 2
+DOWNLOAD_MODE_DOWNLOAD = 3
+DOWNLOAD_MODE_ETC = 4
+DOWNLOAD_SITE_KDB = 10
+DOWNLOAD_SITE_ETC = 100
 
 #Globals------
 DEBUG_MODE = 0
@@ -157,7 +161,8 @@ class Root_Container():
 		self.fill_background()
 		add_default_buttons(self)	#デフォルトのボタンを配置
 		add_default_labels(self)	#デフォルトラベルの配置
-		Setting_Tk_Dialog(self)	#設定画面の呼び出し
+		#設定画面の呼び出し
+		Setting_Tk_Dialog(self).initial_chart_setting()	
 	
 	def add_box(self,child):
 		"""
@@ -296,30 +301,31 @@ class Root_Container():
 		イベントを補足します。ルートにおける一般的なキー入力については即時性が必要ないので、pygame.Key.get_pressedを用います。
 		それ以外はイベントキューを用います。
 		"""
+		#Changed_by_Win - リサイズ時イベントが処理されないバグの修正。fps値の変更
 		#一般のルート側でのキー処理
 		self.keys = pygame.key.get_pressed()
 		#イベントキュー上の処理
-		num_of_processed = 0
+		num_of_processed_MM = 0	#MouseMotionのイベント数を管理する。多すぎてdraw()呼ばれまくりで重くなるため。
 		for event in pygame.event.get():
-			num_of_processed += 1
-			if (num_of_processed % 2 == 0) or (num_of_processed % 5 == 0) or (num_of_processed % 7 == 0) or (num_of_processed % 9 ) == 0 :
-				#イベント数を３分の１にする
-				continue
 			if event.type == pygame.QUIT or self.keys[pygame.K_ESCAPE] :
 				self.looping = False	#停止。
 			elif event.type == pygame.MOUSEBUTTONDOWN :
-				self.fps = 30
+				self.fps = 30	#滑らかに動かす
 				for child_box in self.child_box_list :
 					if child_box.collide_point(event.pos) :
 						child_box.dispatch_MOUSEBUTTONDOWN(event)
 						break
 			elif event.type == pygame.MOUSEBUTTONUP :
-				self.fps = 10
+				self.fps = 4	#プロセッサ時間の節約
 			elif event.type == pygame.VIDEORESIZE :
 				self.screen = pygame.display.set_mode(event.size,pygame.VIDEORESIZE)
 				self.set_child_box_area()
 				self.draw()
 			elif event.type == pygame.MOUSEMOTION :
+				#イベント数を３分の１にする
+				num_of_processed_MM += 1
+				if (num_of_processed_MM % 2 == 0) or (num_of_processed_MM % 5 == 0) or (num_of_processed_MM % 7 == 0) or (num_of_processed_MM % 9 ) == 0 :
+					continue
 				if event.buttons[0] :
 					for child_box in self.child_box_list :
 						if child_box.collide_point(event.pos) :
@@ -513,10 +519,12 @@ class Button_Box(BASE_BOX):
 	実際に、このオブジェクトがイベントシグナルを受け取ったり、描画命令を受けるためには、このオブジェクトがRoot_Containerオブジェクトに関連付けられている(その子BOXである)必要があります。
 	このBOXオブジェクトがイベントシグナルないし描画の呼び出しを受けたときは、このオブジェクトの有するボタンオブジェクト、すなわち、self.button_listリストに登録されているすべてのUI_Buttonオブジェクトの、draw()メソッドをそれぞれ呼び出し、実際に描画します。
 	"""
-	def __init__(self,parent,id_str,font=None):
+	#Changed_by_Win 色の設定
+	def __init__(self,parent,id_str,font=None,color=None):
+		self.BG_color = color or (255,255,255)
 		self.set_parent(parent)
 		self.button_list = []
-		self.font = font or pygame.font.Font(FONT_NAME,18)
+		self.font = font or pygame.font.Font(FONT_NAME,17)
 		self.id_str = id_str
 		self.height_prefix = True
 		self.width_prefix = False
@@ -527,7 +535,8 @@ class Button_Box(BASE_BOX):
 		self._left_top = (0,0)	#この値はRoot_Containerオブジェクトによってのみ設定可能
 	
 	def add_button(self,button_object):
-		if isinstance(button_object,UI_Button):
+		#Changed_by_Win isintanceの修正
+		if isinstance(button_object,(UI_Button,Label_For_ButtonBox)):
 			self.button_list.append(button_object)
 			button_object.set_parent_box(self)
 		else:
@@ -544,7 +553,7 @@ class Button_Box(BASE_BOX):
 		"""
 		rect = self.get_rect()
 		surface = pygame.Surface(self.get_size())
-		surface.fill((255,220,220))
+		surface.fill(self.BG_color)
 		left_top = (self.MARGINE,self.MARGINE)	#細かい見た目の設定と、BOXサーフェスに対する貼り付け位置
 		#ボタンの描画
 		for button in self.button_list:
@@ -584,6 +593,37 @@ class Content(object):
 	def set_parent_box(self,parent):
 		self._parent_box = parent
 	
+#Changed By Windows - ボタンBOX用のラベルオブジェクト。UI_BUTTOnのサイズについてのインターフェイスの必要性。
+class Label_For_ButtonBox(Content):
+	"""
+	"""
+	def __init__(self,string):
+		Content.__init__(self)
+		self.string = unicode(" "+string+" ","utf-8")
+		self.button_color = (255,255,255)
+		self._left_top =(0,0)
+		self._width = 0
+		self._height = 0
+		self.id=None
+
+	#Changed_by_Win widthなどの情報はButton_boxの描画メソッド内でも使う。また、surfaceにはカラーキーの設定
+	def draw(self,target_surface,left_top,font):
+		"""
+		UI_Buttonのまね
+		"""
+		surface = font.render(self.string,True,(0,0,0),self.button_color)
+		surface.set_colorkey((255,255,255))
+		target_surface.blit(surface,left_top)
+		#動的に決定される描画領域についての保存。多くイベントのdispatchで用いられる。
+		self._width = surface.get_width()
+		self._height = surface.get_height()
+		self._left_top = left_top
+
+	def collide_point(self,pos):
+		"""
+		イベント処理は不要
+		"""
+		pass
 
 class UI_Button(Content):
 	"""
@@ -605,7 +645,7 @@ class UI_Button(Content):
 		また、この際決定されるボタンサイズ、親Button_Boxオブジェクトにおける座標位置、についての情報をメンバ変数として格納する。
 		"""
 		button_color =  (255,0,0) if self.state else (255,255,255)
-		surface = font.render(self.string,False,(0,0,0),button_color)
+		surface = font.render(self.string,True,(0,0,0),button_color)
 		pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
 		target_surface.blit(surface,left_top)
 		#動的に決定される描画領域についての保存。多くイベントのdispatchで用いられる。
@@ -704,7 +744,7 @@ class Horizontal_Ruler(object):
 		このメソッドの呼び出し元は、このメソッド終了後、サーフェスをY軸方向にフリップするのでテキストは予めフリップしておく必要がある
 		"""
 		drawing_height = self.chart.price_to_height(self.price)
-		price_renderd = font.render(unicode(str(self.price),"utf-8"),False,(0,0,0))
+		price_renderd = font.render(unicode(str(self.price),"utf-8"),True,(0,0,0))
 		flipped = pygame.transform.flip(price_renderd,False,True)
 		drawing_price_renderd_H = drawing_height - (price_renderd.get_height()/2)
 		drawing_rect = pygame.Rect((0,drawing_price_renderd_H),price_renderd.get_size())
@@ -813,7 +853,8 @@ class Stock_Chart(Content):
 	株価データリストのコレクションとしての配列、stock_price_listは、[日時,始値,高値,安値,終値,出来高,金額]の順のそれぞれの値を表す文字列のリストのリストであり、また、これは「昇順」、つまり、「index=0が、一番古いデータ」を表す形で格納される。つまり、例えば、最新の株価の高値を参照する式は、stock_price_list[len(stock_price_list)][2]となる。
 	なお、この「価格の種類」と「インデックス値」の変換にはユーティリティ関数self.pricetype2index()が用いられるべきである。これは価格の種類を表す文字列、「"O","H","L","C"」を引数に渡すと、それに対応するindex値を返す。
 	"""
-	def __init__(self,security_code,term_num,download_mode):
+	#Changed_by_Windows ダウンロードサイトの保存
+	def __init__(self,security_code,term_num,download_mode,site=DOWNLOAD_SITE_ETC):
 		"""
 		"""
 		#株価情報についてのメンバ変数
@@ -842,6 +883,7 @@ class Stock_Chart(Content):
 
 		#データの保存とフェッチに関するメタ情報を格納するメンバ変数
 		self.download_mode = download_mode	#ローカル環境に株価データがあればそれを用いる
+		self.download_site = site
 		self.file_header = []	#ローカルファイルに保存するためのファイルヘッダ
 
 		#イベントに関するフラグ変数
@@ -925,14 +967,26 @@ class Stock_Chart(Content):
 			return True	#もはやダウンロードの必要はない。制御を返す。
 		#Tabになかったらフェッチし、保存する。
 		self.stock_price_list = []	#初期化
-		if self.download_mode == DOWNLOAD_MODE_LOCAL and self.exist_stock_price_file() :
+		#Changed_by_Windows - ダウンロードモード機構の変更:モードとサイトの２重構造にする---------------
+		if self.download_mode == DOWNLOAD_MODE_LOCAL :
 			#ローカルモードであり、対象のファイルがローカルにあれば
-			if not self.download_price_data_from_file() :	return False
-		elif self.download_mode == DOWNLOAD_MODE_KDB :
-			#k-db.comからダウンロードします。
-			if not self.download_price_data_from_kdb() :	return False
-		else :
+			if self.exist_stock_price_file() :
+				if not self.download_price_data_from_file() :	return False
+			else :
+				return False
+		elif self.download_mode == DOWNLOAD_MODE_DIFF :
+			#差分ダウンロード
 			raise Exception("未定義です")
+		elif self.download_mode == DOWNLOAD_MODE_DOWNLOAD :
+			#強制ダウンロード
+			if self.download_site == DOWNLOAD_SITE_KDB :
+				if not self.download_price_data_from_kdb() :	return False
+			else :
+				raise Exception("未定義のサイトです")
+		else :
+			raise Exception("未定義のモードです")
+		#--------------------------------------------------------------
+
 		#最後のエラー補足。株価データが正常かを確認
 		if not self.stock_price_list :
 			return False
@@ -1228,20 +1282,137 @@ class Stock_Chart(Content):
 		surface_drawn_candle = self.draw_candle(surface_size)
 		#移動平均線の描画
 		surface_drawn_moving_average = self.draw_moving_average(surface_size)
+		#出来高の描画
+		surface_drawn_dekidaka = self.draw_dekidaka(surface_size,font)
 		#座標の線などその他要素の描画
 		surface_drawn_axis = self.draw_coordinate_axis(surface_size,high_price,low_price,font)
-		surface_drawn_additonal_information = self.draw_additional_information(surface_size,bold_font)
 		surface_drawn_yaxis = self.draw_y_axis(surface_size,font)	
+		#追加情報の描画
+		surface_drawn_additonal_information = self.draw_additional_information(surface_size,bold_font)
+		surface_drawn_additonal_setting_info = self.draw_additional_setting_info(surface_size,bold_font)
+		#動的な要素の描画
 		surface_drawn_highlight = self.draw_highlight(surface_size)
 		surface_drawn_horizontal_rulers = self.draw_horizontal_rulers(surface_size,font)
 		#諸サーフェスのblit;blit順で全面背面の関係性が決定
 		surface.blit(surface_drawn_highlight,(0,0))
+#		surface.blit(surface_drawn_dekidaka,(0,surface.get_height() * (float(1)/3) ))
+		surface.blit(surface_drawn_dekidaka,(0,0))
 		surface.blit(surface_drawn_axis,(0,0))
 		surface.blit(surface_drawn_yaxis,(0,0))
 		surface.blit(surface_drawn_additonal_information,(0,0))
+		surface.blit(surface_drawn_additonal_setting_info,(0,0))
 		surface.blit(surface_drawn_horizontal_rulers,(0,0))
 		surface.blit(surface_drawn_candle,(0,0))
 		surface.blit(surface_drawn_moving_average,(0,0))
+
+	#Changed_by_Windows 
+	def draw_additional_setting_info(self,surface_size,font):
+		"""
+		セッティングについての情報の描画。サーフェスサイズについては、普通の情報描画についても同じことをしてもいいかもしれない
+		つまり、ぴったりのサーフェスを作る。という処理方法。
+		右から順番に押し込んでいく。そのためアルゴリズムが若干面倒くさくなる
+		1,移動平均線についての情報。
+		2,Y-prefix
+		"""
+		v_padding = self.vertical_padding
+		side_padding = self.right_side_padding
+		height = font.size("あ")[1] + v_padding
+		surface = self.get_surface((surface_size[0],height))
+		right = surface_size[0] - side_padding
+		if self._Y_axis_fixed == True :
+			renderd = font.render(u"Y軸固定",True,(100,100,100))
+			right = right - renderd.get_width() - side_padding/2 
+			surface.blit(renderd,(right,v_padding))
+		for MA in self.moving_averages :
+			color = MA.color
+			days = "%d日移動平均" % (MA.days)
+			days = unicode(days,"utf-8")
+			renderd = font.render(days,True,color)
+			right = right - renderd.get_width() - side_padding/2
+			surface.blit(renderd,(right,v_padding))
+			 
+		return surface
+
+	#Changed_by_Windows
+	def draw_dekidaka(self,surface_size,font):
+		"""
+		出来高の描画
+		"""
+		#半分
+		half_size = (surface_size[0],surface_size[1])
+		half_surface = self.get_surface(half_size)
+		#出来高の価格幅の算出
+		start , end = self.get_drawing_index()
+		dekidaka_list = []	#ここ別の記法?
+		for price_list in self.stock_price_list[start:end+1] :
+			dekidaka_list.append(price_list[5])	#pricetype2indexを使うべき
+		high , low , price_range = self.get_price_range_dekidaka(dekidaka_list)
+		#convert_scaleの生成
+		convert_scale =  float(half_surface.get_height()) / price_range
+
+		#横線の描画
+#		y_axis_surface = self.draw_y_axis_dekidaka(surface_size,font,high,low,convert_scale)
+#		half_surface.blit(y_axis_surface,(0,0))
+		#いざ描画
+		now_index = start	#アルゴリズム変える
+		for dekidaka in dekidaka_list :
+			x = self.get_index2pos_x(now_index)
+			height = self.price_to_height_dekidaka(convert_scale,low,dekidaka)
+			candle_width , padding = self.get_drawing_size()
+			rect = pygame.Rect((x-(candle_width/2),0 ),(candle_width,height))
+			pygame.draw.rect(half_surface,(255,200,200),rect,candle_width)
+			now_index += 1
+
+		flipped = pygame.transform.flip(half_surface,False,True)
+		return flipped
+
+	#Changed_by_Windows
+	def price_to_height_dekidaka(self,convert_scale,least_val,price):
+		"""
+		出来高用のprice_to_height
+		これも後で変える
+		"""
+		return int(round(( float(price) * convert_scale ) - ( float(least_val) * convert_scale )))
+
+	#Changed_by_Windows 
+	def get_price_range_dekidaka(self,dekidaka_list):
+		"""
+		price_rangeを返す関数。これも枠組みを変えるべきだろう
+		"""
+		for index in range(len(dekidaka_list)-1,1,-1) :
+			if dekidaka_list[index] == 0 or dekidaka_list[index-1] == 0:
+				continue
+#			val = dekidaka_list[index] / dekidaka_list[1] 
+			val=1
+			#最近の出来高から言って法外な値でなければ初期値の設定
+			if val < 10 :
+				high_price , low_price = dekidaka_list[index] , dekidaka_list[index]
+				break
+
+		for dekidaka in dekidaka_list :
+			if dekidaka == 0 :
+				continue
+			if dekidaka > high_price and float(dekidaka) / high_price < 30:
+				high_price = dekidaka
+			elif dekidaka < low_price  and float(low_price) /dekidaka < 30:
+				low_price = dekidaka
+
+		return high_price , low_price , high_price-low_price
+
+	#Changed_by_Windows
+	def draw_y_axis_dekidaka(self,surface_size,font,high,low,convert_scale):
+		"""
+		出来高の横線の描画
+		ここも大きく枠組みを変えるべきでしょう
+		というかいらないな。いるとしても工夫がいる。
+		"""
+		surface = self.get_surface(surface_size)
+		price_range = high - low
+		for i in range(1,6):
+			price = price_range * (float(i)/6) + low
+			y = self.price_to_height_dekidaka(convert_scale,low,price )
+			pygame.draw.aaline(surface,(255,200,200),(0,y),(surface_size[0],y))
+		return surface
 
 	def get_drawing_size(self):
 		zoom_scale = self.get_zoom_scale()
@@ -1308,6 +1479,16 @@ class Stock_Chart(Content):
 		if TERM_DICT[self.term_for_a_bar] in ("日足","前場後場") :
 			short_MA = Moving_Average(self,5,"C",(255,0,0))
 			middle_MA = Moving_Average(self,25,"C",(0,0,255))
+#			long_MA =Moving_Average(self,75,"C",(0,0,0))
+
+			self.moving_averages.append(short_MA)
+			self.moving_averages.append(middle_MA)
+#			self.moving_averages.append(long_MA)
+
+		#Changed_by_Windows - 分足とかにもMA使えるかな。
+		elif TERM_DICT[self.term_for_a_bar] in ("5分足","1分足") :
+			short_MA = Moving_Average(self,5,"C",(255,0,0))
+			middle_MA = Moving_Average(self,10,"C",(0,0,255))
 #			long_MA =Moving_Average(self,75,"C",(0,0,0))
 
 			self.moving_averages.append(short_MA)
@@ -1435,6 +1616,8 @@ class Stock_Chart(Content):
 		surface = self.get_surface(surface_size)
 		additional_informations = []	#追加情報を表す文字列の一時リスト
 		padding = self.left_side_padiing
+		#Changed_by_Windows サーフェスサイズ、paddingのわずかな修正。
+		v_padding = self.vertical_padding
 		start_index , end_index = self.get_drawing_index()
 		start_date = self.stock_price_list[start_index][0].replace("-","/")	#描画している一番初めの日時
 		end_date = self.stock_price_list[end_index][0].replace("-","/")	#描画している一番最後の日時
@@ -1448,8 +1631,8 @@ class Stock_Chart(Content):
 		#レンダリングとサーフェスの生成、描画
 		left = padding
 		for info_str in additional_informations:
-			renderd = font.render(info_str,False,(255,0,0))
-			surface.blit(renderd,(left,padding))
+			renderd = font.render(info_str,True,(255,0,0))
+			surface.blit(renderd,(left,v_padding))
 			left += padding + renderd.get_width()
 
 		return surface
@@ -1508,7 +1691,7 @@ class Stock_Chart(Content):
 		for i in range(low_price,high_price+axis_interval,axis_interval) :
 			pos_y = self.price_to_height(i)
 			pygame.draw.line(surface,(0,0,0),(0,pos_y),(surface_width,pos_y),1)	#横線
-			text_surface = font.render(str(i),False,(0,0,0))
+			text_surface = font.render(str(i),True,(0,0,0))
 			text_size = font.size(str(i))
 			flipped_surface = pygame.transform.flip(text_surface,False,True)	#最後の座標の反転のため
 			surface.blit(flipped_surface,(surface_width-text_size[0],pos_y-text_size[1]))	#文字
@@ -1603,7 +1786,7 @@ class Stock_Chart(Content):
 		surface_height = surface.get_height()
 		pos_x = self.get_index2pos_x(index)
 		font_width,font_height = font.size(date_str)
-		text_surface = font.render(date_str,False,(0,0,0))
+		text_surface = font.render(date_str,True,(0,0,0))
 		line_end_Y = surface_height - font_height - 2
 		line_color = color if color else (0,0,0)	#デフォルトは黒
 
@@ -1651,7 +1834,8 @@ class Stock_Chart(Content):
 		"""
 		このオブジェクトの「銘柄コード」、「銘柄名」、「Tab」を継承(共有)する新たなStock_Chartオブジェクトを返す。
 		"""
-		brother = Stock_Chart(self.security_code,term_num,self.download_mode)	#兄弟に当たる新しいオブジェクト
+		#Changed_by_Windows 
+		brother = Stock_Chart(self.security_code,term_num,self.download_mode,self.download_site)	#兄弟に当たる新しいオブジェクト
 		brother.security_name = self.security_name
 		tab = self.get_tab()
 		if tab :
@@ -1664,6 +1848,11 @@ class Stock_Chart(Content):
 		self._highlight_index = index
 
 	def get_highlight_index(self):
+		#Changed_by_Windows 未定義時の自動設定 別のところに書いたほうがよさそう
+		if not self._highlight_index :
+			endindex = self.get_drawing_index()[1]
+			self.set_highlight_index(endindex)
+			self.print_highlight_price_information()
 		return self._highlight_index
 
 	def height_to_price(self,pos_y):
@@ -1677,6 +1866,7 @@ class Stock_Chart(Content):
 		price_for_height = least_val + price_increacement_for_height
 		return price_for_height
 
+	#Changed_by_Windows - 出来高の表示。売買価格の表示
 	def print_highlight_price_information(self):
 		"""
 		ジェネラルラベルに株価情報を表示します
@@ -1690,10 +1880,14 @@ class Stock_Chart(Content):
 		opning , closing = self.get_opning_closing_price(price_list)
 		high , low , NoUse = self.get_price_range(price_list)
 
+		#Changed_by_Windows - 出来高の表示。売買価格の表示 - pricetype2indexを使う
+		dekidaka = price_list[5]
+		kinngaku = price_list[6]
+
 		general_label_box = parent.get_label_box("General")
 		general_labels = general_label_box.label_list
 		general_labels[0].set_string("%s %s %s" % (self.security_code,self.security_name,date))
-		general_labels[1].set_string("高: %d  安: %d 始: %d  終: %d  幅: %d" % (high,low,opning,closing,high-low))
+		general_labels[1].set_string("高: %d  安: %d 始: %d  終: %d  出来高: %d 売買高: %d" % (high,low,opning,closing,dekidaka,kinngaku))
 		general_label_box.draw()
 
 	def dispatch_MOUSEBUTTONDOWN(self,event):
@@ -1819,43 +2013,85 @@ class Setting_Tk_Dialog(object):
 		4,入力終了時に呼び出すバインド関数の登録
 		5,root.mainloo()でTkメインループの呼び出し
 		"""
-		if not isinstance(parent,(BASE_BOX,Root_Container)) :
+		#Changed_by_Windows isinstanceの修正。チェック機構はそれぞれのsettingメソッドに拡張する
+		if not isinstance(parent,(BASE_BOX,Root_Container,Stock_Chart)) :
 			raise TypeError("引数がBOXオブジェクトあるいはRoot_Containerオブジェクトでありません")
 		self.parent = parent	#呼び出し元オブジェクト
 		event_attrs = {"from":self}
 		self.dummy_event = pygame.event.Event(pygame.USEREVENT,event_attrs)	#ダミーのイベントオブジェクト
 
-		#Tkの呼び出し
+		#Tkの呼び出し 
 		self.root = Tk.Tk()	#Tkのルートウィンドウ
 		self.root.title("設定画面")
+
+	#Changed_by_Windows 
+	def additional_chart_setting(self):
+		"""
+		チャートについての追加設定用画面
+		"""
+		#(フォーカスのある)Stock_Chartから呼ばれるべき？？Boxのほうがいい？ -> 現在の枠組みだと設定内容を持ってるのがチャートobjだからそっちかな
+		if not isinstance(self.parent,(BASE_BOX,Stock_Chart)) :
+			raise TypeError("少なくともBOXかチャートobj")
+		pass
+
+	def done_additional_chart_setting(self,Nouse):
+		"""
+		追加設定終了時の完了メソッド
+		"""
+		self.root.destroy()	#Tkルートウィンドウを破棄
+		
+
+	#Changed_by_Windows Setting_Tk_Dialogオブジェクトの枠組みの変革。オブジェクトの生成側が、明示的に呼び出すようにする。
+	def initial_chart_setting(self):
+		"""
+		チャート設定の初期画面。
+		株価チャートを入力させる。
+		"""
+		#ROOTかBOXオブジェクトから呼ばれるべき
+		if not isinstance(self.parent,(BASE_BOX,Root_Container)) :
+			raise TypeError("引数がBOXオブジェクトあるいはRoot_Containerオブジェクトでありません")
 		#TkVariables
+		#Changed_by_Windows　デフォルト値の設定に変数を使おう。
 		self.security_code_Tkvar = Tk.StringVar()
 		self.term_for_a_bar_Tkvar=Tk.IntVar()
-		self.term_for_a_bar_Tkvar.set(3)
+		self.term_for_a_bar_Tkvar.set(TERM_DICT["日足"])
 		self.download_mode_Tkvar = Tk.IntVar()
-		self.download_mode_Tkvar.set(1)
+		self.download_mode_Tkvar.set(DOWNLOAD_MODE_LOCAL)
 		#TkWidgets
 		#Entry:証券コード入力欄
 		security_code_entry = Tk.Entry(self.root,textvariable=self.security_code_Tkvar)	
 		security_code_entry.pack()
 		security_code_entry.focus()
-		security_code_entry.bind("<Return>",self.done)
-		#Radiobutton:データダウンロードについてのオプション
-		optional_information_radiobutton_labelframe = Tk.LabelFrame(self.root,text="オプショナルな設定")
-		optional_information_radiobutton_labelframe.pack()
-		Tk.Radiobutton(optional_information_radiobutton_labelframe,text="ローカルモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
-		Tk.Radiobutton(optional_information_radiobutton_labelframe,text="差分モード:kdb.com",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_KDB).pack(side="left")
+		security_code_entry.bind("<Return>",self.done_initial_setting)
+
+		#Changed_by_Windows - ダウンロードモードとサイトの選択機構の変更----------------
+		#また、ローカルの場合は関数にバインドさせてサイト設定要素を無効にすべき。
+		self.download_site_Tkvar = Tk.IntVar()
+		self.download_site_Tkvar.set(DOWNLOAD_SITE_KDB)
+		#Radiobutton:データダウンロードについてのモード選択
+		download_mode_radiobutton_labelframe = Tk.LabelFrame(self.root,text="ダウンロードモードの設定")
+		download_mode_radiobutton_labelframe.pack()
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="ローカルモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="差分モード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DIFF).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="通常ダウンロード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DOWNLOAD).pack(side="left")
+		#Radiobutton:データダウンロードについてのサイト選択
+		download_site_radiobutton_labelframe = Tk.LabelFrame(self.root,text="データの参照先")
+		download_site_radiobutton_labelframe.pack()
+		Tk.Radiobutton(download_site_radiobutton_labelframe,text="kdb.com",variable=self.download_site_Tkvar,value=DOWNLOAD_SITE_KDB).pack(side="left")
+
+		#--------------------------------
+
 		#Radiobutton:足ごとの期間の設定ボタン
 		term_for_a_bar_radiobutton_labelframe=Tk.LabelFrame(self.root,text="１足あたりの期間")	#足期間設定フレーム
 		term_for_a_bar_radiobutton_labelframe.pack()
 		for term in TERM_LIST :
 			Tk.Radiobutton(term_for_a_bar_radiobutton_labelframe,text=term,value=TERM_DICT[term],variable=self.term_for_a_bar_Tkvar).pack(side="left")
 		#Button:OKボタン
-		Tk.Button(self.root,text="done",command=self.done).pack()	#Button:入力終了時self.done()が呼ばれる。
+		Tk.Button(self.root,text="done",command=self.done_initial_setting).pack()	#Button:入力終了時self.done()が呼ばれる。
 		#Tk main_loop
 		self.root.mainloop()
 
-	def done(self,NoUse=None):
+	def done_initial_setting(self,NoUse=None):
 		"""
 		ユーザーによる情報入力完了時に呼び出されるメソッドで、証券コードチェックの後、株価情報のフェッチと保存をし、フェッチしたCSVデータに問題がなければ、チャート描画のためのオブジェクトの作成を行う。
 
@@ -1867,11 +2103,12 @@ class Setting_Tk_Dialog(object):
 		security_code = self.security_code_Tkvar.get()	#証券コード入力エントリー
 		term_num = self.term_for_a_bar_Tkvar.get()	#足期間
 		download_mode = self.download_mode_Tkvar.get()
+		download_site = self.download_site_Tkvar.get()
 		#証券コードのチェック
 		if security_code.isdigit() and int(math.log10(int(security_code))+1) == 4 :
 			#stock_chartオブジェクト、tabオブジェクトの生成と初期設定
 			tab = Tab()
-			stock_chart_object = Stock_Chart(security_code,term_num,download_mode) #CSVをフェッチし、データを保持するオブジェクト
+			stock_chart_object = Stock_Chart(security_code,term_num,download_mode,site=download_site) #CSVをフェッチし、データを保持するオブジェクト
 			stock_chart_object.set_tab(tab)
 			#株価CSVデータのフェッチと保存が成功したらTkrootウィンドウを破棄し、
 			if stock_chart_object.download_price_data() :
@@ -1883,24 +2120,30 @@ class Setting_Tk_Dialog(object):
 				term_button.dispatch_MOUSEBUTTONDOWN(self.dummy_event)
 
 				self.root.destroy()	#Tkルートウィンドウを破棄
+			#Changed_by_Windows エラー処理をしよう
+			else :
+				tkMessageBox.showerror(message="データのダウンロードに失敗しました。")
 		else :
 			tkMessageBox.showerror(message="証券コード：数字4桁を入力してください。")
 
 
 #General Functions-----
 
+#Changed_by_Windows - 色の設定。ラベルの追加
 def add_default_buttons(root):
 	"""
 	"""
 	#足期間のショートカットボタン
-	button_box = Button_Box(root,"buttons_for_term")
+	button_box = Button_Box(root,"buttons_for_term",color=(255,200,200))
+	button_box.add_button(Label_For_ButtonBox("足期間"))
 	for term in TERM_LIST :
 		button = UI_Button(term,TERM_DICT[term],pressed_term_button)
 		button_box.add_button(button)
 	root.add_box(button_box)
 
 	#チャートについての詳細設定
-	button_box = Button_Box(root,"buttons_for_chart_setting")
+	button_box = Button_Box(root,"buttons_for_chart_setting",color=(200,255,200))
+	button_box.add_button(Label_For_ButtonBox("チャート設定"))
 	button_informations = []	#(id_str,bind_function,swiching)の情報を格納する一時変数
 	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True) )
 	button_informations.append( ("Ruler-Default",pressed_set_ruler_default,False) )
