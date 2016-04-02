@@ -1479,11 +1479,13 @@ class Stock_Chart(Content):
 		if TERM_DICT[self.term_for_a_bar] in ("日足","前場後場") :
 			short_MA = Moving_Average(self,5,"C",(255,0,0))
 			middle_MA = Moving_Average(self,25,"C",(0,0,255))
-#			long_MA =Moving_Average(self,75,"C",(0,0,0))
+			long_MA =Moving_Average(self,75,"C",(0,255,0))
+			morelong_MA =Moving_Average(self,135,"C",(255,255,0))
 
 			self.moving_averages.append(short_MA)
 			self.moving_averages.append(middle_MA)
-#			self.moving_averages.append(long_MA)
+			self.moving_averages.append(long_MA)
+			self.moving_averages.append(morelong_MA)
 
 		#Changed_by_Windows - 分足とかにもMA使えるかな。
 		elif TERM_DICT[self.term_for_a_bar] in ("5分足","1分足") :
