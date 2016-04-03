@@ -519,9 +519,9 @@ class Button_Box(BASE_BOX):
 	実際に、このオブジェクトがイベントシグナルを受け取ったり、描画命令を受けるためには、このオブジェクトがRoot_Containerオブジェクトに関連付けられている(その子BOXである)必要があります。
 	このBOXオブジェクトがイベントシグナルないし描画の呼び出しを受けたときは、このオブジェクトの有するボタンオブジェクト、すなわち、self.button_listリストに登録されているすべてのUI_Buttonオブジェクトの、draw()メソッドをそれぞれ呼び出し、実際に描画します。
 	"""
-	#Changed_by_Win 色の設定
+	#Changed_by_Win 色の設定:つまりbgcolorの設定
 	def __init__(self,parent,id_str,font=None,color=None):
-		self.BG_color = color or (255,255,255)
+		self.BG_color = color or (255,255,255)	#Changed
 		self.set_parent(parent)
 		self.button_list = []
 		self.font = font or pygame.font.Font(FONT_NAME,17)
@@ -536,7 +536,7 @@ class Button_Box(BASE_BOX):
 	
 	def add_button(self,button_object):
 		#Changed_by_Win isintanceの修正
-		if isinstance(button_object,(UI_Button,Label_For_ButtonBox)):
+		if isinstance(button_object,(UI_Button,Label_of_ButtonBox)):
 			self.button_list.append(button_object)
 			button_object.set_parent_box(self)
 		else:
@@ -553,7 +553,7 @@ class Button_Box(BASE_BOX):
 		"""
 		rect = self.get_rect()
 		surface = pygame.Surface(self.get_size())
-		surface.fill(self.BG_color)
+		surface.fill(self.BG_color)	#Changed
 		left_top = (self.MARGINE,self.MARGINE)	#細かい見た目の設定と、BOXサーフェスに対する貼り付け位置
 		#ボタンの描画
 		for button in self.button_list:
@@ -592,52 +592,79 @@ class Content(object):
 	
 	def set_parent_box(self,parent):
 		self._parent_box = parent
+
+
+#Changed By windows -UI-BUttonとLabel_For_ButtonBoxの共通親
+#このまま移植して問題ない.ただし、動きは追ってコメントを書くこと。
+class Content_of_ButtonBox(Content):
+	"""
+	self.collideでサイズを用いる。
+	残念ながらdraw()は定義しがたい。さすがにラベルとボタンでは描画処理に差がある。
+	"""
+	def __init__(self,string,id_str):
+		self.string = unicode(" "+string+" ","utf-8")	#エンコードしとく
+		self.id = id_str
+	
+	def collide_point(self,pos):
+		x = pos[0]
+		y = pos[1]
+		left_top , width , height = self.get_size()
+		if left_top[0] <= x <= width+left_top[0] and left_top[1]+height >= y >= left_top[1] :
+			return True
+		else :
+			return False
+
+	def set_size(self,left_top,width,height):
+		#エラー処理
+		if not isinstance(left_top,tuple):
+			raise Exception("引数が不正です")
+		self._left_top = left_top
+		self._width = width
+		self._height = height
+
+	def get_size(self):
+		return self._left_top , self._width , self._height
+
 	
 #Changed By Windows - ボタンBOX用のラベルオブジェクト。UI_BUTTOnのサイズについてのインターフェイスの必要性。
-class Label_For_ButtonBox(Content):
+#このまま移植して問題ないが、一行ずつ動きを追って,コメントは書き直したい
+class Label_of_ButtonBox(Content_of_ButtonBox):
 	"""
 	"""
 	def __init__(self,string):
-		Content.__init__(self)
-		self.string = unicode(" "+string+" ","utf-8")
-		self.button_color = (255,255,255)
-		self._left_top =(0,0)
-		self._width = 0
-		self._height = 0
-		self.id=None
+		Content_of_ButtonBox.__init__(self,string,None)	#IDは渡さない
+		#set_sizeにより設定
+		self._left_top , _width , _height= (0,0) , 0 , 0	#以下3つのプロパティはButton_Boxオブジェクトにより描画時、動的に与えられる。
 
 	#Changed_by_Win widthなどの情報はButton_boxの描画メソッド内でも使う。また、surfaceにはカラーキーの設定
 	def draw(self,target_surface,left_top,font):
 		"""
-		UI_Buttonのまね
+		もらう引数が同じなので継承を使うべきが、いかんせんボタンとラベルでは処理が異なるのでべた書き。
 		"""
-		surface = font.render(self.string,True,(0,0,0),self.button_color)
-		surface.set_colorkey((255,255,255))
+		surface = font.render(self.string,True,(0,0,0),(255,255,255))
+		surface.set_colorkey((255,255,255))	#Button_Boxの背景色と同化
 		target_surface.blit(surface,left_top)
-		#動的に決定される描画領域についての保存。多くイベントのdispatchで用いられる。
-		self._width = surface.get_width()
-		self._height = surface.get_height()
-		self._left_top = left_top
+		#動的に決定される描画領域についての保存。
+		w , h = surface.get_width() , surface.get_height()
+		self.set_size(left_top,w,h)
 
-	def collide_point(self,pos):
+	def dispatch_MOUSEBUTTONDOWN(self,event):
 		"""
 		イベント処理は不要
 		"""
 		pass
 
-class UI_Button(Content):
+#Changed By win : collideは上位クラスに移動,__init__の変更,また、drawにおいて、set_size()を導入した
+class UI_Button(Content_of_ButtonBox):
 	"""
 	このアプリのユーザーインターフェースにおける"ボタン"を表すオブジェクトで、このオブジェクトは、Root_Containerオブジェクトに関連付けられた(ーつまり、その子BOXである)Button_Boxオブジェクトに関連付けられることにより、Root_Containerからのイベントの補足(シグナル)、及び描画(関数)の呼び出しを受けることができる。
 	"""
 	def __init__(self,string,id_str,command):
-		Content.__init__(self)
-		self.string = unicode(" "+string+" ","utf-8")
-		self.id = id_str	#ボタンを識別するためのID文字列。外部との接続に必要
+		Content_of_ButtonBox.__init__(self,string,id_str)
 		self.command = command	#ボタンが押された時に起動する関数オブジェクト
 		self.state = False	#押されているかいないか
-		self._left_top = (0,0)	#以下3つのプロパティはButton_Boxオブジェクトにより描画時、動的に与えられる。
-		self._width = 0
-		self._height = 0
+		# set_size()インターフェースにより設定
+		self._left_top , _width , _height= (0,0) , 0 , 0	#以下3つのプロパティはButton_Boxオブジェクトにより描画時、動的に与えられる。
 
 	def draw(self,target_surface,left_top,font):
 		"""
@@ -648,18 +675,9 @@ class UI_Button(Content):
 		surface = font.render(self.string,True,(0,0,0),button_color)
 		pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
 		target_surface.blit(surface,left_top)
-		#動的に決定される描画領域についての保存。多くイベントのdispatchで用いられる。
-		self._width = surface.get_width()
-		self._height = surface.get_height()
-		self._left_top = left_top
-
-	def collide_point(self,pos):
-		x = pos[0]
-		y = pos[1]
-		if self._left_top[0] <= x <= self._width+self._left_top[0] and self._left_top[1]+self._height >= y >= self._left_top[1] :
-			return True
-		else :
-			return False
+		#Changed:ここだけ 動的に決定される描画領域についての保存。self.collideなどで用いられる。
+		w , h = surface.get_width() , surface.get_height()
+		self.set_size(left_top,w,h)
 
 	def dispatch_MOUSEBUTTONDOWN(self,event):
 		"""
@@ -2137,7 +2155,7 @@ def add_default_buttons(root):
 	"""
 	#足期間のショートカットボタン
 	button_box = Button_Box(root,"buttons_for_term",color=(255,200,200))
-	button_box.add_button(Label_For_ButtonBox("足期間"))
+	button_box.add_button(Label_of_ButtonBox("足期間"))
 	for term in TERM_LIST :
 		button = UI_Button(term,TERM_DICT[term],pressed_term_button)
 		button_box.add_button(button)
@@ -2145,7 +2163,7 @@ def add_default_buttons(root):
 
 	#チャートについての詳細設定
 	button_box = Button_Box(root,"buttons_for_chart_setting",color=(200,255,200))
-	button_box.add_button(Label_For_ButtonBox("チャート設定"))
+	button_box.add_button(Label_of_ButtonBox("チャート設定"))
 	button_informations = []	#(id_str,bind_function,swiching)の情報を格納する一時変数
 	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True) )
 	button_informations.append( ("Ruler-Default",pressed_set_ruler_default,False) )
