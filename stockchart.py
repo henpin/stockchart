@@ -301,7 +301,6 @@ class Root_Container():
 		イベントを補足します。ルートにおける一般的なキー入力については即時性が必要ないので、pygame.Key.get_pressedを用います。
 		それ以外はイベントキューを用います。
 		"""
-		#Changed_by_Win - リサイズ時イベントが処理されないバグの修正。fps値の変更
 		#一般のルート側でのキー処理
 		self.keys = pygame.key.get_pressed()
 		#イベントキュー上の処理
@@ -519,9 +518,8 @@ class Button_Box(BASE_BOX):
 	実際に、このオブジェクトがイベントシグナルを受け取ったり、描画命令を受けるためには、このオブジェクトがRoot_Containerオブジェクトに関連付けられている(その子BOXである)必要があります。
 	このBOXオブジェクトがイベントシグナルないし描画の呼び出しを受けたときは、このオブジェクトの有するボタンオブジェクト、すなわち、self.button_listリストに登録されているすべてのUI_Buttonオブジェクトの、draw()メソッドをそれぞれ呼び出し、実際に描画します。
 	"""
-	#Changed_by_Win 色の設定:つまりbgcolorの設定
 	def __init__(self,parent,id_str,font=None,color=None):
-		self.BG_color = color or (255,255,255)	#Changed
+		self.BG_color = color or (255,255,255)
 		self.set_parent(parent)
 		self.button_list = []
 		self.font = font or pygame.font.Font(FONT_NAME,17)
@@ -535,7 +533,6 @@ class Button_Box(BASE_BOX):
 		self._left_top = (0,0)	#この値はRoot_Containerオブジェクトによってのみ設定可能
 	
 	def add_button(self,button_object):
-		#Changed_by_Win isintanceの修正
 		if isinstance(button_object,(UI_Button,Label_of_ButtonBox)):
 			self.button_list.append(button_object)
 			button_object.set_parent_box(self)
@@ -553,7 +550,7 @@ class Button_Box(BASE_BOX):
 		"""
 		rect = self.get_rect()
 		surface = pygame.Surface(self.get_size())
-		surface.fill(self.BG_color)	#Changed
+		surface.fill(self.BG_color)
 		left_top = (self.MARGINE,self.MARGINE)	#細かい見た目の設定と、BOXサーフェスに対する貼り付け位置
 		#ボタンの描画
 		for button in self.button_list:
@@ -594,8 +591,6 @@ class Content(object):
 		self._parent_box = parent
 
 
-#Changed By windows -UI-BUttonとLabel_For_ButtonBoxの共通親
-#このまま移植して問題ない.ただし、動きは追ってコメントを書くこと。
 class Content_of_ButtonBox(Content):
 	"""
 	self.collideでサイズを用いる。
@@ -625,9 +620,7 @@ class Content_of_ButtonBox(Content):
 	def get_size(self):
 		return self._left_top , self._width , self._height
 
-	
-#Changed By Windows - ボタンBOX用のラベルオブジェクト。UI_BUTTOnのサイズについてのインターフェイスの必要性。
-#このまま移植して問題ないが、一行ずつ動きを追って,コメントは書き直したい
+
 class Label_of_ButtonBox(Content_of_ButtonBox):
 	"""
 	"""
@@ -654,7 +647,7 @@ class Label_of_ButtonBox(Content_of_ButtonBox):
 		"""
 		pass
 
-#Changed By win : collideは上位クラスに移動,__init__の変更,また、drawにおいて、set_size()を導入した
+
 class UI_Button(Content_of_ButtonBox):
 	"""
 	このアプリのユーザーインターフェースにおける"ボタン"を表すオブジェクトで、このオブジェクトは、Root_Containerオブジェクトに関連付けられた(ーつまり、その子BOXである)Button_Boxオブジェクトに関連付けられることにより、Root_Containerからのイベントの補足(シグナル)、及び描画(関数)の呼び出しを受けることができる。
@@ -675,7 +668,7 @@ class UI_Button(Content_of_ButtonBox):
 		surface = font.render(self.string,True,(0,0,0),button_color)
 		pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
 		target_surface.blit(surface,left_top)
-		#Changed:ここだけ 動的に決定される描画領域についての保存。self.collideなどで用いられる。
+		#動的に決定される描画領域についての保存。self.collideなどで用いられる。
 		w , h = surface.get_width() , surface.get_height()
 		self.set_size(left_top,w,h)
 
