@@ -808,58 +808,78 @@ class Horizontal_Ruler(object):
 		else :
 			return False
 
+
 class Moving_Average(object):
 	"""
 	移動平均についてのデータの算出と描画を担当するオブジェクトで、それを定義するためのいくつかのプロパティを有する。
 	"""
-	def __init__(self,parent,days,price_type,color):
+	def __init__(self,parent,days,price_type,color,visible=True):
 		"""
 		"""
+		if not isinstance(parent,Stock_Chart) :
+			raise Exception("親がStock_Chartオブジェクトでありません")
 		self.parent = parent	#親のStock_Chartオブジェクト
 		self.days = days	#移動平均日数
 		self.price_type = price_type	#終値その他の価格タイプを表す文字列"C","H"他
 		self.color = color	
-		self.point_list = []	#描画する点の座標値のリスト
+		self.visible = visible
+		self.MAlist = []	#移動平均値の保管リスト
 		self.least_days = round( self.days * 2/3 )	#指定日数の3/2以上のデータ数が確保できれば許容
+		#移動平均値の算出と格納
+		self.calc()
 
-	def calc(self,start_index,end_index):
+	def set_visible(self,visible=True):
+		self.visible = visible
+
+	def set_imvisible(self):
+		self.visible = False
+
+	def is_visible(self):
+		return self.visible
+
+	def calc(self):
 		"""
-		移動平均値を算出し、描画する
+		全チャート期間における移動平均値を算出し、self.MAlistに格納する。
 		"""
-		self.point_list = []	#初期化
+		MAlist = []	#一時変数。最後にタプル化したものをself.MAlistに格納
 		price_list = self.parent.stock_price_list
-		target_price_type = self.parent.pricetype2index(self.price_type)
-		#左端から移動平均線を描画する為に算出範囲を広げる。->start_indexをいじる
-		if start_index >= self.days :
-			start_index -= self.days
-		for index in range(start_index,end_index+1) :
-			if index - start_index < self.days :
-				continue
+		target_index = self.parent.pricetype2index(self.price_type)	#定義された価格タイプを表すprice_listにおけるindex値
+		f = ( lambda x : MAlist.append(0) )	#一時関数。無効な値としてindex値に対応させておくためのユーティリティ
+		#移動平均値の算出。算出可能なのは、index値が少なくともself.days以上の時。
+		for list_index in range(0,len(price_list)+1) :
+			if list_index <= self.days :
+				#price_listとindex値を完全に同期する為に0を加えておく
+				f(0)
 			else :
-				moving_prices = []	#X日間の指定の価格データの一時保管リスト
-				Xdays_ago = index - self.days
-				for MA_index in range(index,Xdays_ago,-1) :
-					price = price_list[MA_index][target_price_type]
-					if price :	#株価データがないときはパス
-						moving_prices.append(price)
-				#該当期間にある程度以上価格情報があれば
-				if len(moving_prices) >= self.least_days :
-					price_sum = 0
-					for price in moving_prices :
-						price_sum += price
+				start , end = list_index-self.days , list_index
+				#今のlist_indexからself.days前までにおける、(0でない)(定義された価格種類の)価格値を集計する。
+				moving_prices = [ a_price_list[target_index] for a_price_list in price_list[start:end+1] if a_price_list[target_index] ]
 
-					moving_average = round(float (price_sum) / len(moving_prices))
-					#indexと移動平均価格値から、描画する座標値に変換
-					pos_x = self.parent.get_index2pos_x(index)	#x値はローソク足描画時にindexに対して定義された値
-					pos_y = self.parent.price_to_height(moving_average)	#y値は価格を高さに変換した値
-					self.point_list.append((pos_x,pos_y))
+				#最低限の要素を満たしているかチェックした後、移動平均値の算出
+				if len( moving_prices ) >= self.least_days :
+					moving_average = float( sum(moving_prices) ) / len(moving_prices)
+					MAlist.append( round(moving_average) )
+				else :
+					f(0)	#無効な値として0を格納しておく。
+		self.MAlist = tuple(MAlist)
+
+	def get_MA(self,index):
+		"""
+		引数indexで定義される移動平均値を返す。indexの値は親Stock_Chartオブジェクトのprice_listにおけるindex値と同期されている。
+		ただし、無効な値としてそれが定義されていたとき、仮の値として0を返す。
+		"""
+		return self.MAlist[index]
 
 	def draw_to_surface(self,surface):
 		"""
-		self.calc()で算出された座標値にもとづいて与えられたサーフェスに直接描画する
+		self.calcによって算出された移動平均データにもとづいて与えられたサーフェスに直接描画する。
 		"""
-		pygame.draw.aalines(surface,self.color,False,self.point_list)
-				
+		start , end = self.parent.get_drawing_index()
+		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
+		f = ( lambda  index,price : ( self.parent.get_index2pos_x(index) , self.parent.price_to_height(price) ) )
+		point_list = [ f(index,self.MAlist[index]) for index in range(start,end+1) if self.MAlist[index] ]
+		pygame.draw.aalines(surface,self.color,False,point_list)
+
 
 class Stock_Chart(Content):
 	"""
@@ -1164,11 +1184,14 @@ class Stock_Chart(Content):
 			tmp_list = line.split(",")	#CSV文章の各行をリスト化
 			#１行目:予期される正しいCSV文章かのチェックと株名の保存
 			if i == 1 :
+				#サイトの構造変更の為チェックができなくなった
+				"""
 				if ( not tmp_list[0] == str(self.security_code)+"-T" ) or ( not tmp_list[3].strip() == TERM_DICT[self.term_for_csv] ) :
 					return False
 				else: 
+				if True :
 					self.security_name = tmp_list[2]
-					if not line in self.file_header :	
+					if not line in self.file_header :
 						self.file_header.append(line)
 					i+=1
 					continue
@@ -1177,6 +1200,10 @@ class Stock_Chart(Content):
 				if not line in self.file_header :	
 					self.file_header.append(line)
 				i+=1
+				continue
+				"""
+				self.security_name = ""
+				i = i + 1
 				continue
 			#3行目以降:第２フィールド以下をintに変換してself.stock_price_listにappend
 			else :
@@ -1194,7 +1221,8 @@ class Stock_Chart(Content):
 					elif tmp_list[field_num] == "-":
 						csv_converted_list.append(0)
 					else :
-						csv_converted_list.append(int(tmp_list[field_num]))
+						csv_converted_list.append(int(float(tmp_list[field_num])))
+#						csv_converted_list.append(int(tmp_list[field_num]))
 				self.stock_price_list.append(csv_converted_list)
 		return True 
 
@@ -1290,17 +1318,24 @@ class Stock_Chart(Content):
 		surface_drawn_candle = self.draw_candle(surface_size)
 		#移動平均線の描画
 		surface_drawn_moving_average = self.draw_moving_average(surface_size)
+		#出来高の描画
+		surface_drawn_turnover = self.draw_turnover(surface_size,font)
 		#座標の線などその他要素の描画
 		surface_drawn_axis = self.draw_coordinate_axis(surface_size,high_price,low_price,font)
-		surface_drawn_additonal_information = self.draw_additional_information(surface_size,bold_font)
 		surface_drawn_yaxis = self.draw_y_axis(surface_size,font)	
+		#追加情報の描画
+		surface_drawn_additonal_information = self.draw_additional_information(surface_size,bold_font)
+		surface_drawn_additonal_setting_info = self.draw_additional_setting_info(surface_size,bold_font)
+		#動的な要素の描画
 		surface_drawn_highlight = self.draw_highlight(surface_size)
 		surface_drawn_horizontal_rulers = self.draw_horizontal_rulers(surface_size,font)
 		#諸サーフェスのblit;blit順で全面背面の関係性が決定
 		surface.blit(surface_drawn_highlight,(0,0))
+		surface.blit(surface_drawn_turnover,(0,0))
 		surface.blit(surface_drawn_axis,(0,0))
 		surface.blit(surface_drawn_yaxis,(0,0))
 		surface.blit(surface_drawn_additonal_information,(0,0))
+		surface.blit(surface_drawn_additonal_setting_info,(0,0))
 		surface.blit(surface_drawn_horizontal_rulers,(0,0))
 		surface.blit(surface_drawn_candle,(0,0))
 		surface.blit(surface_drawn_moving_average,(0,0))
@@ -1365,16 +1400,19 @@ class Stock_Chart(Content):
 
 	def set_default_moving_averages(self):
 		"""
+		デフォルトの移動平均線の登録を行う
 		"""
 		self.moving_averages = []	#初期化
 		if TERM_DICT[self.term_for_a_bar] in ("日足","前場後場") :
 			short_MA = Moving_Average(self,5,"C",(255,0,0))
 			middle_MA = Moving_Average(self,25,"C",(0,0,255))
-#			long_MA =Moving_Average(self,75,"C",(0,0,0))
+			long_MA =Moving_Average(self,75,"C",(0,255,0))
+			morelong_MA =Moving_Average(self,135,"C",(255,255,0))
 
 			self.moving_averages.append(short_MA)
 			self.moving_averages.append(middle_MA)
-#			self.moving_averages.append(long_MA)
+			self.moving_averages.append(long_MA)
+			self.moving_averages.append(morelong_MA)
 
 	def draw_moving_average(self,surface_size):
 		"""
@@ -1387,11 +1425,55 @@ class Stock_Chart(Content):
 			self.set_default_moving_averages()
 		#移動平均値の算出と描画
 		for MA in self.moving_averages :
-			MA.calc(start_index,end_index)
-			MA.draw_to_surface(surface)
+			if MA.is_visible() :
+				MA.draw_to_surface(surface)
 
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
 		return flipped_surface
+
+	def draw_turnover(self,surface_size,font):
+		"""
+		出来高の描画
+		"""
+		surface = self.get_surface(surface_size)
+		#出来高リストの生成
+		start , end = self.get_drawing_index()
+		turnover_index = self.pricetype2index("T")
+		turnover_list = [ price_list[turnover_index] for price_list in self.stock_price_list[start:end+1] ]
+		#出来高の価格幅の算出
+		#出来高の基本参考値の算出。最近の0でない出来高値を参考値とする
+		f = ( lambda x : turnover_list[x] or f(x-1) )
+		high = low = f(-1)
+		for turnover in turnover_list :
+			if turnover == 0 :
+				continue
+			elif turnover > high and turnover/20 < high :
+				high = turnover
+			elif turnover < low and turnover*20 > low :
+				low =turnover
+		#convert_scale,price_to_heightの生成
+		turnover_range = high - low
+		convert_scale =  float(surface_size[0]) / turnover_range
+		turnover_to_height = ( lambda price : round(( price * convert_scale ) - ( low * convert_scale )) )
+		#横線の描画
+		"""
+		for i in range(1,6):
+			price = turnover_range * (float(i)/6) + low
+			y = turnover_to_height(price)
+			pygame.draw.aaline(surface,(255,200,200),(0,y),(surface_size[0],y))
+		"""
+		#出来高の描画。self.stock_price_listのindex値とturnover_listのindex値を同期しながら大きくしていく。
+		now_index = start
+		candle_width , padding = self.get_drawing_size()
+		for turnover in turnover_list :
+			x = self.get_index2pos_x(now_index)
+			height = turnover_to_height(turnover)
+			rect = pygame.Rect((x-(candle_width/2),0 ),(candle_width,height))
+			pygame.draw.rect(surface,(255,200,200),rect,candle_width)
+			now_index += 1
+
+		flipped = pygame.transform.flip(surface,False,True)
+		return flipped
 
 	def draw_highlight(self,surface_size):
 		"""
@@ -1497,6 +1579,7 @@ class Stock_Chart(Content):
 		surface = self.get_surface(surface_size)
 		additional_informations = []	#追加情報を表す文字列の一時リスト
 		padding = self.left_side_padiing
+		v_padding = self.vertical_padding
 		start_index , end_index = self.get_drawing_index()
 		start_date = self.stock_price_list[start_index][0].replace("-","/")	#描画している一番初めの日時
 		end_date = self.stock_price_list[end_index][0].replace("-","/")	#描画している一番最後の日時
@@ -1510,10 +1593,37 @@ class Stock_Chart(Content):
 		#レンダリングとサーフェスの生成、描画
 		left = padding
 		for info_str in additional_informations:
-			renderd = font.render(info_str,False,(255,0,0))
-			surface.blit(renderd,(left,padding))
+			renderd = font.render(info_str,True,(255,0,0))
+			surface.blit(renderd,(left,v_padding))
 			left += padding + renderd.get_width()
 
+		return surface
+
+	def draw_additional_setting_info(self,surface_size,font):
+		"""
+		セッティングについての情報の描画。サーフェスサイズについては、普通の情報描画についても同じことをしてもいいかもしれない
+		つまり、ぴったりのサーフェスを作る。という処理方法。
+		右から順番に押し込んでいく。そのためアルゴリズムが若干面倒くさくなる
+		1,移動平均線についての情報。
+		2,Y-prefix
+		"""
+		v_padding = self.vertical_padding
+		side_padding = self.right_side_padding
+		height = font.size("あ")[1] + v_padding
+		surface = self.get_surface((surface_size[0],height))
+		right = surface_size[0] - side_padding
+		if self._Y_axis_fixed == True :
+			renderd = font.render(u"Y軸固定",True,(100,100,100))
+			right = right - renderd.get_width() - side_padding/2 
+			surface.blit(renderd,(right,v_padding))
+		for MA in self.moving_averages :
+			color = MA.color if MA.is_visible() else (0,0,0)
+			days = "%d日移動平均" % (MA.days)
+			days = unicode(days,"utf-8")
+			renderd = font.render(days,True,color)
+			right = right - renderd.get_width() - side_padding/2
+			surface.blit(renderd,(right,v_padding))
+			 
 		return surface
 
 	def draw_horizontal_rulers(self,surface_size,font):
@@ -1706,6 +1816,8 @@ class Stock_Chart(Content):
 			return 3
 		elif price_type == "C" :
 			return 4
+		elif price_type == "T" :
+			return 5
 		else :
 			raise Exception("引数が価格の種類を表していません")
 
@@ -1744,18 +1856,21 @@ class Stock_Chart(Content):
 		ジェネラルラベルに株価情報を表示します
 		表示するデータは、indexで指示されるself.stock_price_list[index]の株価データです。
 		"""
-		#ラベルに詳細情報の表示
+		#ラベルに詳細情報を表示するためのいくつかの値の取得
 		parent = self.get_parent_box()
 		highlight_index = self.get_highlight_index()
 		price_list = self.stock_price_list[highlight_index]
+		#日付と価格情報の取得
 		date = price_list[0]
 		opning , closing = self.get_opning_closing_price(price_list)
 		high , low , NoUse = self.get_price_range(price_list)
-
+		turnover = get_human_readable( price_list[self.pricetype2index("T")] )
+		kinngaku = get_human_readable( price_list[6] )
+		#描画
 		general_label_box = parent.get_label_box("General")
 		general_labels = general_label_box.label_list
 		general_labels[0].set_string("%s %s %s" % (self.security_code,self.security_name,date))
-		general_labels[1].set_string("高: %d  安: %d 始: %d  終: %d  幅: %d" % (high,low,opning,closing,high-low))
+		general_labels[1].set_string("高: %d  安: %d  始: %d  終: %d  出来高: %s  売買高: %s" % (high,low,opning,closing,turnover,kinngaku))
 		general_label_box.draw()
 
 	def dispatch_MOUSEBUTTONDOWN(self,event):
@@ -1968,13 +2083,19 @@ def add_default_buttons(root):
 	button_informations = []	#(id_str,bind_function,swiching)の情報を格納する一時変数
 	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True) )
 	button_informations.append( ("Ruler-Default",pressed_set_ruler_default,False) )
-
 	for id_str , bind_function , swiching in button_informations :
 		if swiching :
 			button = UI_Button(id_str,id_str,bind_function)
 		else:
 			button = No_Swith_Button(" "+id_str+" ",id_str,bind_function)
 		button_box.add_button(button)
+	#移動平均線についてのショートカット
+	for MA_days in [5,25,75,135]:
+		id_str = "MA-%d" % (MA_days)
+		label_str = "MA-%dday" % (MA_days)
+		button = UI_Button(label_str,id_str,pressed_MA_setting_shortcut)
+		button_box.add_button(button)
+
 	root.add_box(button_box)
 
 def add_default_labels(root):
@@ -2032,6 +2153,45 @@ def pressed_set_ruler_default(button):
 	focused_box.get_content().set_default_horizontal_rulers()
 	focused_box.draw()
 	return True
+
+def pressed_MA_setting_shortcut(button):
+	"""
+	移動平均線設定のためのショートカット
+	"""
+	root = button.get_parent_box().get_father()
+	focused_box = root.get_focused_box()
+	focused_content = focused_box.get_content()
+
+	MA_days = int( button.id[button.id.find("-")+1:] )
+	for MA in focused_content.moving_averages :
+		if MA.days == MA_days :
+			MA.set_visible(not button.state)
+
+	focused_box.draw()
+	return True
+
+def get_human_readable(num):
+	"""
+	int値をとり、それをヒューマンリーダブルなunicode文字列に変換したものを返す。
+	"""
+	no_human_readable = str(num)
+	human_readable = ""
+	digit = math.log10(num)
+	#億以上なら
+	if digit >= 8 :
+		human_readable = no_human_readable[0:-8]
+		human_readable += "億"
+		#10億以上ならそのまま返す
+		if digit >= 9 :
+			return human_readable
+	#万以上なら
+	if digit >= 4 :
+		start = -7 if digit >= 8 else 0
+		human_readable += no_human_readable[start:-4]
+		human_readable += "万"
+		return human_readable
+	else :
+		return no_human_readable
 
 
 #Main Functions-----
