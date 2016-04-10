@@ -796,7 +796,7 @@ class Horizontal_Ruler(object):
 		else :
 			return False
 
-#Chaged_by win :丸々書き換えた。移植可能なコード。
+
 class Moving_Average(object):
 	"""
 	移動平均についてのデータの算出と描画を担当するオブジェクトで、それを定義するためのいくつかのプロパティを有する。
@@ -1352,7 +1352,6 @@ class Stock_Chart(Content):
 		surface.blit(surface_drawn_candle,(0,0))
 		surface.blit(surface_drawn_moving_average,(0,0))
 
-	#Changed_by_Windows 移植可能なコード
 	def draw_additional_setting_info(self,surface_size,font):
 		"""
 		セッティングについての情報の描画。サーフェスサイズについては、普通の情報描画についても同じことをしてもいいかもしれない
@@ -1380,7 +1379,6 @@ class Stock_Chart(Content):
 			 
 		return surface
 
-	#Changed_by_Windows:移植可能なコード
 	def draw_turnover(self,surface_size,font):
 		"""
 		出来高の描画
@@ -1499,7 +1497,6 @@ class Stock_Chart(Content):
 			self.moving_averages.append(long_MA)
 			self.moving_averages.append(morelong_MA)
 
-		#Changed_by_Windows - 分足とかにもMA使えるかな。
 		elif TERM_DICT[self.term_for_a_bar] in ("5分足","1分足") :
 			short_MA = Moving_Average(self,5,"C",(255,0,0))
 			middle_MA = Moving_Average(self,10,"C",(0,0,255))
@@ -1629,7 +1626,6 @@ class Stock_Chart(Content):
 		surface = self.get_surface(surface_size)
 		additional_informations = []	#追加情報を表す文字列の一時リスト
 		padding = self.left_side_padiing
-		#Changed_by_Windows サーフェスサイズ、paddingのわずかな修正。
 		v_padding = self.vertical_padding
 		start_index , end_index = self.get_drawing_index()
 		start_date = self.stock_price_list[start_index][0].replace("-","/")	#描画している一番初めの日時
@@ -1828,7 +1824,6 @@ class Stock_Chart(Content):
 			date_str_list = self.stock_price_list[index][0].replace(":","-").split("-")
 			return map ( int,date_str_list )
 
-	#Changed_by_Windows
 	def pricetype2index(self,price_type):
 		"""
 		価格の種類に呼応したstock_price_listにおけるそれを表す値を指示するindex値を返すユーティリティ関数。
@@ -1883,7 +1878,6 @@ class Stock_Chart(Content):
 		price_for_height = least_val + price_increacement_for_height
 		return price_for_height
 
-	#Changed_by_Windows - 出来高の表示。売買価格の表示
 	def print_highlight_price_information(self):
 		"""
 		ジェネラルラベルに株価情報を表示します
@@ -1897,7 +1891,6 @@ class Stock_Chart(Content):
 		date = price_list[0]
 		opning , closing = self.get_opning_closing_price(price_list)
 		high , low , NoUse = self.get_price_range(price_list)
-		#Changed_by_Windows - 出来高の表示。売買価格の表示 - pricetype2indexを使う
 		turnover = get_human_readable( price_list[self.pricetype2index("T")] )
 		kinngaku = get_human_readable( price_list[6] )
 		#描画
@@ -2228,7 +2221,6 @@ def pressed_set_ruler_default(button):
 	focused_box.draw()
 	return True
 
-#Changed_by_win
 def get_human_readable(self,num):
 	"""
 	int値を人間に読みやすい形式のユニコード文字列に変える。
