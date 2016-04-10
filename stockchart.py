@@ -629,7 +629,6 @@ class Label_of_ButtonBox(Content_of_ButtonBox):
 		#set_sizeにより設定
 		self._left_top , _width , _height= (0,0) , 0 , 0	#以下3つのプロパティはButton_Boxオブジェクトにより描画時、動的に与えられる。
 
-	#Changed_by_Win widthなどの情報はButton_boxの描画メソッド内でも使う。また、surfaceにはカラーキーの設定
 	def draw(self,target_surface,left_top,font):
 		"""
 		もらう引数が同じなので継承を使うべきが、いかんせんボタンとラベルでは処理が異なるのでべた書き。
@@ -797,6 +796,7 @@ class Horizontal_Ruler(object):
 		else :
 			return False
 
+#Chaged_by win :丸々書き換えた。移植可能なコード。
 class Moving_Average(object):
 	"""
 	移動平均についてのデータの算出と描画を担当するオブジェクトで、それを定義するためのいくつかのプロパティを有する。
@@ -804,20 +804,45 @@ class Moving_Average(object):
 	def __init__(self,parent,days,price_type,color):
 		"""
 		"""
+		if not isinstance(parent,Stock_Chart) :
+			raise Exception("親がStock_Chartオブジェクトでありません")
 		self.parent = parent	#親のStock_Chartオブジェクト
 		self.days = days	#移動平均日数
 		self.price_type = price_type	#終値その他の価格タイプを表す文字列"C","H"他
 		self.color = color	
-		self.point_list = []	#描画する点の座標値のリスト
+		self.MAlist = []	#移動平均値の保管リスト
 		self.least_days = round( self.days * 2/3 )	#指定日数の3/2以上のデータ数が確保できれば許容
+		#移動平均値の算出と格納
+		self.calc()
 
-	def calc(self,start_index,end_index):
+	def calc(self):
 		"""
-		移動平均値を算出し、描画する
+		全チャート期間における移動平均値を算出し、self.MAlistに格納する。
 		"""
-		self.point_list = []	#初期化
+		MAlist = []	#一時変数。最後にタプル化したものをself.MAlistに格納
 		price_list = self.parent.stock_price_list
-		target_price_type = self.parent.pricetype2index(self.price_type)
+		target_index = self.parent.pricetype2index(self.price_type)	#定義された価格タイプを表すprice_listにおけるindex値
+		f = ( lambda x : MAlist.append(0) )	#一時関数。無効な値としてindex値に対応させておくためのユーティリティ
+		#移動平均値の算出。算出可能なのは、index値が少なくともself.days以上の時。
+		for list_index in range(0,len(price_list)+1) :
+			if list_index <= self.days :
+				#price_listとindex値を完全に同期する為に0を加えておく
+				f(0)
+			else :
+				start , end = list_index-self.days , list_index
+				#今のlist_indexからself.days前までにおける、(0でない)(定義された価格種類の)価格値を集計する。
+				moving_prices = [ a_price_list[target_index] for a_price_list in price_list[start:end+1] if a_price_list[target_index] ]
+
+				#最低限の要素を満たしているかチェックした後、移動平均値の算出
+				if len( moving_prices ) >= self.least_days :
+					moving_average = float( sum(moving_prices) ) / len(moving_prices)
+					MAlist.append( round(moving_average) )
+				else :
+					f(0)	#無効な値として0を格納しておく。
+
+		self.MAlist = tuple(MAlist)
+
+		"""
 		#左端から移動平均線を描画する為に算出範囲を広げる。->start_indexをいじる
 		if start_index >= self.days :
 			start_index -= self.days
@@ -842,12 +867,24 @@ class Moving_Average(object):
 					pos_x = self.parent.get_index2pos_x(index)	#x値はローソク足描画時にindexに対して定義された値
 					pos_y = self.parent.price_to_height(moving_average)	#y値は価格を高さに変換した値
 					self.point_list.append((pos_x,pos_y))
+		"""
+
+	def get_MA(self,index):
+		"""
+		引数indexで定義される移動平均値を返す。indexの値は親Stock_Chartオブジェクトのprice_listにおけるindex値と同期されている。
+		ただし、無効な値としてそれが定義されていたとき、仮の値として0を返す。
+		"""
+		return self.MAlist[index]
 
 	def draw_to_surface(self,surface):
 		"""
-		self.calc()で算出された座標値にもとづいて与えられたサーフェスに直接描画する
+		self.calcによって算出された移動平均データにもとづいて与えられたサーフェスに直接描画する。
 		"""
-		pygame.draw.aalines(surface,self.color,False,self.point_list)
+		start , end = self.parent.get_drawing_index()
+		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
+		f = ( lambda  index,price : ( self.parent.get_index2pos_x(index) , self.parent.price_to_height(price) ) )
+		point_list = [ f(index,self.MAlist[index]) for index in range(start,end+1) if self.MAlist[index] ]
+		pygame.draw.aalines(surface,self.color,False,point_list)
 				
 
 class Stock_Chart(Content):
@@ -1294,7 +1331,7 @@ class Stock_Chart(Content):
 		#移動平均線の描画
 		surface_drawn_moving_average = self.draw_moving_average(surface_size)
 		#出来高の描画
-		surface_drawn_dekidaka = self.draw_dekidaka(surface_size,font)
+		surface_drawn_turnover = self.draw_turnover(surface_size,font)
 		#座標の線などその他要素の描画
 		surface_drawn_axis = self.draw_coordinate_axis(surface_size,high_price,low_price,font)
 		surface_drawn_yaxis = self.draw_y_axis(surface_size,font)	
@@ -1306,8 +1343,7 @@ class Stock_Chart(Content):
 		surface_drawn_horizontal_rulers = self.draw_horizontal_rulers(surface_size,font)
 		#諸サーフェスのblit;blit順で全面背面の関係性が決定
 		surface.blit(surface_drawn_highlight,(0,0))
-#		surface.blit(surface_drawn_dekidaka,(0,surface.get_height() * (float(1)/3) ))
-		surface.blit(surface_drawn_dekidaka,(0,0))
+		surface.blit(surface_drawn_turnover,(0,0))
 		surface.blit(surface_drawn_axis,(0,0))
 		surface.blit(surface_drawn_yaxis,(0,0))
 		surface.blit(surface_drawn_additonal_information,(0,0))
@@ -1316,7 +1352,7 @@ class Stock_Chart(Content):
 		surface.blit(surface_drawn_candle,(0,0))
 		surface.blit(surface_drawn_moving_average,(0,0))
 
-	#Changed_by_Windows 
+	#Changed_by_Windows 移植可能なコード
 	def draw_additional_setting_info(self,surface_size,font):
 		"""
 		セッティングについての情報の描画。サーフェスサイズについては、普通の情報描画についても同じことをしてもいいかもしれない
@@ -1344,86 +1380,51 @@ class Stock_Chart(Content):
 			 
 		return surface
 
-	#Changed_by_Windows
-	def draw_dekidaka(self,surface_size,font):
+	#Changed_by_Windows:移植可能なコード
+	def draw_turnover(self,surface_size,font):
 		"""
 		出来高の描画
 		"""
-		#半分
-		half_size = (surface_size[0],surface_size[1])
-		half_surface = self.get_surface(half_size)
-		#出来高の価格幅の算出
+		surface = self.get_surface(surface_size)
+		#出来高リストの生成
 		start , end = self.get_drawing_index()
-		dekidaka_list = []	#ここ別の記法?
-		for price_list in self.stock_price_list[start:end+1] :
-			dekidaka_list.append(price_list[5])	#pricetype2indexを使うべき
-		high , low , price_range = self.get_price_range_dekidaka(dekidaka_list)
-		#convert_scaleの生成
-		convert_scale =  float(half_surface.get_height()) / price_range
-
+		turnover_index = self.pricetype2index("T")
+		turnover_list = [ price_list[turnover_index] for price_list in self.stock_price_list[start:end+1] ]
+		#出来高の価格幅の算出
+		i = 1
+		#基本参考値の算出。最近の0でない出来高値を参考値とする
+		f = ( lambda x : turnover_list[x] or f(x-1) )
+		high = low = f(-1)
+		for turnover in turnover_list :
+			if turnover == 0 :
+				continue
+			elif turnover > high and turnover/20 < high :
+				high = turnover
+			elif turnover < low and turnover*20 > low :
+				low =turnover
+		#convert_scale,price_to_heightの生成
+		turnover_range = high - low
+		convert_scale =  float(surface_size[0]) / turnover_range
+		turnover_to_height = ( lambda price : round(( price * convert_scale ) - ( low * convert_scale )) )
 		#横線の描画
-#		y_axis_surface = self.draw_y_axis_dekidaka(surface_size,font,high,low,convert_scale)
-#		half_surface.blit(y_axis_surface,(0,0))
-		#いざ描画
-		now_index = start	#アルゴリズム変える
-		for dekidaka in dekidaka_list :
+		"""
+		for i in range(1,6):
+			price = turnover_range * (float(i)/6) + low
+			y = turnover_to_height(price)
+			pygame.draw.aaline(surface,(255,200,200),(0,y),(surface_size[0],y))
+		"""
+		#出来高の描画。self.stock_price_listのindex値とturnover_listのindex値を同期しながら大きくしていく。
+		now_index = start
+		candle_width , padding = self.get_drawing_size()
+		for turnover in turnover_list :
 			x = self.get_index2pos_x(now_index)
-			height = self.price_to_height_dekidaka(convert_scale,low,dekidaka)
-			candle_width , padding = self.get_drawing_size()
+			height = turnover_to_height(turnover)
 			rect = pygame.Rect((x-(candle_width/2),0 ),(candle_width,height))
-			pygame.draw.rect(half_surface,(255,200,200),rect,candle_width)
+			pygame.draw.rect(surface,(255,200,200),rect,candle_width)
 			now_index += 1
 
-		flipped = pygame.transform.flip(half_surface,False,True)
+		flipped = pygame.transform.flip(surface,False,True)
 		return flipped
-
-	#Changed_by_Windows
-	def price_to_height_dekidaka(self,convert_scale,least_val,price):
-		"""
-		出来高用のprice_to_height
-		これも後で変える
-		"""
-		return int(round(( float(price) * convert_scale ) - ( float(least_val) * convert_scale )))
-
-	#Changed_by_Windows 
-	def get_price_range_dekidaka(self,dekidaka_list):
-		"""
-		price_rangeを返す関数。これも枠組みを変えるべきだろう
-		"""
-		for index in range(len(dekidaka_list)-1,1,-1) :
-			if dekidaka_list[index] == 0 or dekidaka_list[index-1] == 0:
-				continue
-#			val = dekidaka_list[index] / dekidaka_list[1] 
-			val=1
-			#最近の出来高から言って法外な値でなければ初期値の設定
-			if val < 10 :
-				high_price , low_price = dekidaka_list[index] , dekidaka_list[index]
-				break
-
-		for dekidaka in dekidaka_list :
-			if dekidaka == 0 :
-				continue
-			if dekidaka > high_price and float(dekidaka) / high_price < 30:
-				high_price = dekidaka
-			elif dekidaka < low_price  and float(low_price) /dekidaka < 30:
-				low_price = dekidaka
-
-		return high_price , low_price , high_price-low_price
-
-	#Changed_by_Windows
-	def draw_y_axis_dekidaka(self,surface_size,font,high,low,convert_scale):
-		"""
-		出来高の横線の描画
-		ここも大きく枠組みを変えるべきでしょう
-		というかいらないな。いるとしても工夫がいる。
-		"""
-		surface = self.get_surface(surface_size)
-		price_range = high - low
-		for i in range(1,6):
-			price = price_range * (float(i)/6) + low
-			y = self.price_to_height_dekidaka(convert_scale,low,price )
-			pygame.draw.aaline(surface,(255,200,200),(0,y),(surface_size[0],y))
-		return surface
 
 	def get_drawing_size(self):
 		zoom_scale = self.get_zoom_scale()
@@ -1519,7 +1520,6 @@ class Stock_Chart(Content):
 			self.set_default_moving_averages()
 		#移動平均値の算出と描画
 		for MA in self.moving_averages :
-			MA.calc(start_index,end_index)
 			MA.draw_to_surface(surface)
 
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
@@ -1828,6 +1828,7 @@ class Stock_Chart(Content):
 			date_str_list = self.stock_price_list[index][0].replace(":","-").split("-")
 			return map ( int,date_str_list )
 
+	#Changed_by_Windows
 	def pricetype2index(self,price_type):
 		"""
 		価格の種類に呼応したstock_price_listにおけるそれを表す値を指示するindex値を返すユーティリティ関数。
@@ -1840,6 +1841,9 @@ class Stock_Chart(Content):
 			return 3
 		elif price_type == "C" :
 			return 4
+		elif price_type == "T" :
+			#出来高
+			return 5
 		else :
 			raise Exception("引数が価格の種類を表していません")
 
@@ -1885,22 +1889,22 @@ class Stock_Chart(Content):
 		ジェネラルラベルに株価情報を表示します
 		表示するデータは、indexで指示されるself.stock_price_list[index]の株価データです。
 		"""
-		#ラベルに詳細情報の表示
+		#ラベルに詳細情報を表示するためのいくつかの値の取得
 		parent = self.get_parent_box()
 		highlight_index = self.get_highlight_index()
 		price_list = self.stock_price_list[highlight_index]
+		#日付と価格情報の取得
 		date = price_list[0]
 		opning , closing = self.get_opning_closing_price(price_list)
 		high , low , NoUse = self.get_price_range(price_list)
-
 		#Changed_by_Windows - 出来高の表示。売買価格の表示 - pricetype2indexを使う
-		dekidaka = price_list[5]
-		kinngaku = price_list[6]
-
+		turnover = get_human_readable( price_list[self.pricetype2index("T")] )
+		kinngaku = get_human_readable( price_list[6] )
+		#描画
 		general_label_box = parent.get_label_box("General")
 		general_labels = general_label_box.label_list
 		general_labels[0].set_string("%s %s %s" % (self.security_code,self.security_name,date))
-		general_labels[1].set_string("高: %d  安: %d 始: %d  終: %d  出来高: %d 売買高: %d" % (high,low,opning,closing,dekidaka,kinngaku))
+		general_labels[1].set_string("高: %d  安: %d  始: %d  終: %d  出来高: %d  売買高: %d" % (high,low,opning,closing,turnover,kinngaku))
 		general_label_box.draw()
 
 	def dispatch_MOUSEBUTTONDOWN(self,event):
@@ -2142,7 +2146,6 @@ class Setting_Tk_Dialog(object):
 
 #General Functions-----
 
-#Changed_by_Windows - 色の設定。ラベルの追加
 def add_default_buttons(root):
 	"""
 	"""
@@ -2225,6 +2228,12 @@ def pressed_set_ruler_default(button):
 	focused_box.draw()
 	return True
 
+#Changed_by_win
+def get_human_readable(self,num):
+	"""
+	int値を人間に読みやすい形式のユニコード文字列に変える。
+	"""
+	return num
 
 #Main Functions-----
 def main():
