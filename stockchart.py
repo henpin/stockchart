@@ -42,8 +42,11 @@ BUTTON_SIZE = (40,30)
 FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
 BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
 DOWNLOAD_MODE_LOCAL = 1
-DOWNLOAD_MODE_KDB = 2
-DOWNLOAD_MODE_ETC = 3
+DOWNLOAD_MODE_DIFF = 2
+DOWNLOAD_MODE_DOWNLOAD = 3
+DOWNLOAD_MODE_ETC = 4
+DOWNLOAD_SITE_KDB = 10
+DOWNLOAD_SITE_ETC = 100
 
 #Globals------
 DEBUG_MODE = 0
@@ -157,7 +160,7 @@ class Root_Container():
 		self.fill_background()
 		add_default_buttons(self)	#デフォルトのボタンを配置
 		add_default_labels(self)	#デフォルトラベルの配置
-		Setting_Tk_Dialog(self)	#設定画面の呼び出し
+		Setting_Tk_Dialog(self).initial_chart_setting()	 #設定画面の呼び出し
 	
 	def add_box(self,child):
 		"""
@@ -894,15 +897,39 @@ class Stock_Chart(Content):
 	# Stock_price_list #
 	株価データリストのコレクションとしての配列、stock_price_listは、[日時,始値,高値,安値,終値,出来高,金額]の順のそれぞれの値を表す文字列のリストのリストであり、また、これは「昇順」、つまり、「index=0が、一番古いデータ」を表す形で格納される。つまり、例えば、最新の株価の高値を参照する式は、stock_price_list[len(stock_price_list)][2]となる。
 	なお、この「価格の種類」と「インデックス値」の変換にはユーティリティ関数self.pricetype2index()が用いられるべきである。これは価格の種類を表す文字列、「"O","H","L","C"」を引数に渡すと、それに対応するindex値を返す。
+
+	#データのフェッチと変換と格納# 
+	これを一挙に担うインターフェイスとしてのメソッドは、download_price_data()で、これはまずこのオブジェクトに定義された、ダウンロードモードdownload_modeから、どの方法でＣＳＶファイルをインクルードし、あるいはそのリソース源を得るか。ということについて判断する。
+	1,DOWNLOAD_MODE_LOCAL:データをもっぱらローカル環境からインクルードする。トラフィックのロスがないが、最新情報としての信ぴょう性がない。
+	2,DOWNLOAD_MODE_DIFF:まずローカル環境のファイルを捜索し、それがないか、あるいは古いタイムスタンプのファイルであると判定されたら定義されたdownload_siteからそれをフェッチする。
+	3,DOWNLOAD_MODE_DOWNLOAD:ローカルのファイルのいかんに問わず、データを指定されたさいとからフェッチする。
+	続いて、実際のデータのインクルードが行われる。ローカルからのインクルードの場合、使われるメソッドは、download_price_data_from_file()で、これは単純にインクルードを行う。べつリソースからのダウンロードの場合、download_price_data_from_web()が呼ばれ、ここにおいて定義されたサイトself.download_siteが参照され、実際のデータのロケーターを算出する。
+	で、それぞれのダウンロードメソッドは、それぞれ、対象のリソース名、すなわち前者では、ファイル名、後者ではURLを自動生成し、これに対して実際のインクルード処理をおこなう。
+	で、その処理が正常に終了したら、続いて「その個々のメソッド内で」save_csv_data()メソッドが呼ばれる。このメソッドは、csvデータを表す(つまり、今インクルードされた)文字列を引数に取り、これをしかるべきデータ型に変換。そしてこれをこのオブジェクト内のstock_price_listメンバ変数に格納する。
+	最後にdownload_price_data()メソッドに制御を戻し、このデータの最終チェックを行って、正しく処理が完了していればTrueを返す。
+	#階層図 :
+	1, download_price_data = 最上層のデータのフェッチ、変換、格納、ローカルへの吐き出し、タブとの同期、エラー補足、についてのインターフェイス。
+		->2, read_from_tab() : タブに既にデータがあれば読み込み。
+		->3, download_price_data_from_file : ファイルからデータを読み出し、変換、格納。
+				->4, convert_self_to_filename : ファイル名の取得
+						-> 6,save_csv(fromfile=True) : csvの変換と格納。
+		->3, download_price_data_from_web : インターネットからデータをフェッチする際の中間インターフェイス。ここで種差を吸収する。
+			->4, download_price_data_from_kdb : ダウンロードサイトkbdからデータをフェッチ、変換、格納。
+				->5, get_urls : urlの取得。
+					-> 6,fetch_csv : csvデータのフェッチ
+						-> 7,save_csv() : csvの返還と格納
+		->6,synchro_with_tab() : タブと同期
+
+	エラー文の出力は、処理階層における末端の処理部分が担う。それより下は単にFalseを階層的に返し続け、呼び出しもとにそれを返す。
 	"""
-	def __init__(self,security_code,term_num,download_mode):
+	def __init__(self,security_code,term_num,download_mode,site=DOWNLOAD_SITE_ETC):
 		"""
 		"""
 		#株価情報についてのメンバ変数
 		Content.__init__(self)
 		self.stock_price_list = []	#ダウンロードされた株価情報。fetch_csv()メソッドにより入力
 		self.security_code = security_code	#証券コード文字列
-		security_name = ""	#証券名。CSVのフェッチと保存の際に設定される
+		self.security_name = ""	#証券名。CSVのフェッチと保存の際に設定される
 		self.term_for_a_bar = None	#５分足、１０分足、日足、週足、月足のいずれの情報か
 		self.term_for_csv = None	#週足、月足、は日足CSVデータから算出するため、CSVファイルの実態は日足データとなる
 
@@ -924,6 +951,7 @@ class Stock_Chart(Content):
 
 		#データの保存とフェッチに関するメタ情報を格納するメンバ変数
 		self.download_mode = download_mode	#ローカル環境に株価データがあればそれを用いる
+		self.download_site = site
 		self.file_header = []	#ローカルファイルに保存するためのファイルヘッダ
 
 		#イベントに関するフラグ変数
@@ -1007,14 +1035,27 @@ class Stock_Chart(Content):
 			return True	#もはやダウンロードの必要はない。制御を返す。
 		#Tabになかったらフェッチし、保存する。
 		self.stock_price_list = []	#初期化
-		if self.download_mode == DOWNLOAD_MODE_LOCAL and self.exist_stock_price_file() :
-			#ローカルモードであり、対象のファイルがローカルにあれば
-			if not self.download_price_data_from_file() :	return False
-		elif self.download_mode == DOWNLOAD_MODE_KDB :
-			#k-db.comからダウンロードします。
-			if not self.download_price_data_from_kdb() :	return False
+		#定義されたダウンロードモードに基づく処理の分岐
+		if self.download_mode == DOWNLOAD_MODE_LOCAL :
+			#ローカルモード
+			if not self.download_price_data_from_file() :
+				return False
+		elif self.download_mode == DOWNLOAD_MODE_DIFF :
+			#差分ダウンロード:未定義。
+			if self.exist_stock_price_file() :
+				#ファイルがあり、かつタイムスタンプが最新であればファイルからロード
+				if not self.download_price_data_from_file() :
+					return False
+			else :
+				#さもなくばインターネットからフェッチ
+				if not self.download_price_data_from_web() :
+					return False
+		elif self.download_mode == DOWNLOAD_MODE_DOWNLOAD :
+			#強制ダウンロード
+			if not self.download_price_data_from_web() :
+				return False
 		else :
-			raise Exception("未定義です")
+			raise Exception("未定義のモードです")
 		#最後のエラー補足。株価データが正常かを確認
 		if not self.stock_price_list :
 			return False
@@ -1030,12 +1071,17 @@ class Stock_Chart(Content):
 		"""
 		ローカルファイルから株価情報をインポートします。失敗すればFalseを返します
 		"""
+		#ファイルの確認
+		if not self.exist_stock_price_file() :
+			tkMessageBox.showerror(message="ローカルに対象のファイルが存在しません。")
+			return False
+		#ファイル名の生成と読み込み、変換。
 		filename = self.convert_self_to_filename()
 		fileobj = open(filename,"r")
 		csv_text = fileobj.read()
 		fileobj.close()
 		if not self.save_csv_data(csv_text,from_file=True):
-			return False
+			return False	#csvの変換と格納の失敗
 		return True
 
 	def exist_stock_price_file(self):
@@ -1051,29 +1097,41 @@ class Stock_Chart(Content):
 		filename = CSV_DIR + "/%s-T%s.csv" % (self.security_code,TERM2URL_DICT[TERM_DICT[self.term_for_csv]])
 		return filename
 
+	def download_price_data_from_web(self):
+		"""
+		オンラインからのデータのフェッチのための中間インターフェイス。諸所のサイトにおける種差はここで吸収する。
+		"""
+		if self.download_site == DOWNLOAD_SITE_KDB :
+			if not self.download_price_data_from_kdb() :
+				return False
+		else :
+			raise Exception("未定義のサイトです")
+		self.save_csv_to_local()	#ローカルへ保存
+		return True
+
 	def download_price_data_from_kdb(self):
 		"""
-		k-db.comよりCSVデータのフェッチと設定を行う
-		なお、自動でローカルにファイルを生成し、そのデータを保存する
+		k-db.comよりCSVデータのフェッチとその変換、格納を行う
 		"""
 		url_list = []
 		#urlの設定
 		if TERM_DICT[self.term_for_csv] in ("日足","前場後場") :
 			url_term_phrase = TERM2URL_DICT[TERM_DICT[self.term_for_csv]]
-			if url_term_phrase :	url_term_phrase = "/" + url_term_phrase
+			if url_term_phrase :
+				url_term_phrase = "/" + url_term_phrase
 			for year in range(2016,2012,-1) :
 				url = "http://www.k-db.com/stocks/%s-T%s?year=%d&download=csv" % (self.security_code,url_term_phrase,year)
 				url_list.append(url)
 		else :
 			url_list = self.get_urls(self.term_for_csv)
 			if url_list == False :
+				tkMessageBox.showerror(message="kdb.comについて、分足のデータに関するurlの自動補足ができませんでした。")
 				return False
 		#CSVのフェッチとコンバート、保存を行い、何らかのエラーが出た時にはFalseを返す。
 		for url in url_list:
 			if not self.fetch_csv(url):
 				return False
 		self.stock_price_list.reverse()	#逆順、つまり日時において昇順にします
-		self.save_csv_to_local()	#ローカルファイルに保存
 		return True
 
 	def get_urls(self,term_num):
@@ -1139,7 +1197,7 @@ class Stock_Chart(Content):
 
 	def fetch_csv(self,url):
 		"""
-		株価データダウンロードサイトk-db.comから株価データをCSV形式でフェッチする。
+		定義されたulrから株価データをCSV形式でフェッチする。
 		正常にダウンロードの完了したCSV文章は、データ構造をリスト形式に変換され、self.stock_price_listに保存される。
 		この処理は、実際にはself.save_csv_data()メソッドによって行われ、同時にデータチェックも行われる。
 
@@ -1155,16 +1213,17 @@ class Stock_Chart(Content):
 			respose = urllib2.urlopen(request)
 		except urllib2.URLError,e:
 			print e.reason	#デバッグプリント
-			tkMessageBox.showerror(message="CSVのダウンロードに失敗しました。")
+			tkMessageBox.showerror(message="%s : CSVのダウンロードに失敗しました。" % (url))
 			return False
 		csv_text = unicode(respose.read(),"Shift-Jis").encode("utf-8")	#Shift-JisからUnicode文字列へ
 		if DEBUG_MODE :
-			open("debug_stockfile.txt","w").write(csv_text)
-			print "フェッチしたファイル debug_stockfile.txt を現ディレクトリに生成しました。"
+			print csv_text
+			debug_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),"debug.txt")
+			open(debug_file,"w").write(csv_text)
+			print "フェッチしたファイル debug.txt をプロジェクトディレクトリに生成しました。"
 		#self.save_csv_data()メソッドを呼び出し、データチェックに引っかかったらFalseをリターンする
 		if not self.save_csv_data(csv_text) :
-			tkMessageBox.showerror(message="証券コードが間違っているか、予期せぬCSV形式です。")
-			return False
+			return False	#csvデータの解釈と変換、格納の失敗。
 		return True	#フェッチとデータ格納完了
 
 	def save_csv_data(self,csv_text,from_file=False):
@@ -1187,9 +1246,9 @@ class Stock_Chart(Content):
 				#サイトの構造変更の為チェックができなくなった
 				"""
 				if ( not tmp_list[0] == str(self.security_code)+"-T" ) or ( not tmp_list[3].strip() == TERM_DICT[self.term_for_csv] ) :
+					tkMessageBox.showerror(message="予期せぬデータの書式です。デバッグ情報を確認してください。")
 					return False
 				else: 
-				if True :
 					self.security_name = tmp_list[2]
 					if not line in self.file_header :
 						self.file_header.append(line)
@@ -1202,7 +1261,6 @@ class Stock_Chart(Content):
 				i+=1
 				continue
 				"""
-				self.security_name = ""
 				i = i + 1
 				continue
 			#3行目以降:第２フィールド以下をintに変換してself.stock_price_listにappend
@@ -1825,7 +1883,7 @@ class Stock_Chart(Content):
 		"""
 		このオブジェクトの「銘柄コード」、「銘柄名」、「Tab」を継承(共有)する新たなStock_Chartオブジェクトを返す。
 		"""
-		brother = Stock_Chart(self.security_code,term_num,self.download_mode)	#兄弟に当たる新しいオブジェクト
+		brother = Stock_Chart(self.security_code,term_num,self.download_mode,self.download_site)	#兄弟に当たる新しいオブジェクト
 		brother.security_name = self.security_name
 		tab = self.get_tab()
 		if tab :
@@ -1834,11 +1892,28 @@ class Stock_Chart(Content):
 
 	def set_highlight_index(self,index):
 		"""
+		ハイライト表示する要素のindex値の定義を行うインターフェイス。
 		"""
 		self._highlight_index = index
 
 	def get_highlight_index(self):
+		"""
+		定義されたハイライト表示する要素のindex値を取得するインターフェイス。
+		ハイライトするindexが未定義の時、デフォルトで最も最近のチャート足を表現するindex値を定義する。
+		"""
+		if not self._highlight_index :
+			self.set_highlight_index_default()
 		return self._highlight_index
+
+	def set_highlight_index_default(self):
+		"""
+		ハイライト表示するチャート足を表すindex値をデフォルト値として定義する。
+		また、ハイライトされた足についての株価情報を表示するラベルと情報を同期するためにprint_highlight_price_information()を呼ぶ。
+		なお、デフォルトのindex値は、直近のチャート足である。
+		"""
+		endindex = self.get_drawing_index()[1]
+		self.set_highlight_index(endindex)
+		self.print_highlight_price_information()
 
 	def height_to_price(self,pos_y):
 		"""
@@ -1980,59 +2055,93 @@ class Get_Url_Parser(HTMLParser):
 class Setting_Tk_Dialog(object):
 	"""
 	ユーザーに銘柄コードの入力と、チャートについての設定を求めるダイアログを生成し、実際に株価データを保持するオブジェクトの生成、またはそのオブジェクトへの表示領域の提供を行うためのインターフェイスとしてのクラスです。
-
-	1,インスタンス生成時、初期化メソッド中でGUI(Tk)のメインループ（無限ループ）を呼び出し、ユーザーに銘柄コードの入力及びチャートについての設定値の入力を求めます。
-	2,その諸設定値は(入力終了時に)このオブジェクトのメンバ変数に保存されます。
-	3,ユーザーによる入力が完了すると、実際に株価データのフェッチ、コンバート、保持を行うStock_Chartオブジェクトを生成します。
-	4,これらのデータに関する処理が正常に終了したら、このStock_Chartオブジェクトに表示領域を提供するBOXオブジェクトを生成し、また、そのBOXオブジェクトをこのコンストラクタの呼び出し元であるBOXオブジェクトに関連付けます。
+	
+	1,このクラスのオブジェクトが生成されると、内部でTkのルートオブジェクトを生成し、このオブジェクトのrootメンバ変数に格納します。
+	2,外からこのオブジェクトのsettingメソッドが呼ばれると、適当なGUI要素を格納した、Tkのwindowが生成され、これがこのプログラムのメインループを占有します。
+	3,ユーザーによる入力が完了すると、呼び出されたsettingメソッドに対応するdoneメソッドが呼び出され、実際に株価データのフェッチ、コンバート、保持を行うStock_Chartオブジェクトを生成したり、あるいは既存のそれに対するいくつかの設定を行います。
+	4,特に、チャートオブジェクトの初期化設定のプロセスにおいては、これらのデータに関する処理が正常に終了したら、このStock_Chartオブジェクトに表示領域を提供するBOXオブジェクトを生成し、また、そのBOXオブジェクトをこのコンストラクタの呼び出し元であるBOX(or Root)オブジェクトに関連付けます。
 	これによってユーザーの情報の入力から、実際の表示領域の確保までの実際の橋渡しが終了します。
 	5,最後にTkのメインループをBreakし、この設定画面の呼び出し元に制御を返します。
+
+	#階層#
+	1,__init__ : TkのRootウィンドウの生成と保持
+		->2,settingメソッド : 定義されたＧＵＩ要素を格納したTk-windowのメインループを呼び出す。制御はpygameからこちらに完全にうつる。
+			->3,doneメソッド : 再初期化処理。ユーザーからの入力を解釈して実際の設定文を実行する。設定プロセスが正常に完了したら、tkのメインループを止め、rootをdestroyする。また、入力にエラーがあれば、それをユーザーに知らせ、制御を元のtkメインループに戻す。
 	"""
 	def __init__(self,parent):
 		"""
-		インスタンス変数の作成と、ユーザーに情報の入力を求めるためのTkウィンドウの起動を行う。具体的には、
-		1,Tk.Tk()によりTkルートウィンドウの作成
-		2,Tkウィジェットの作成と、パッキング
-		4,入力終了時に呼び出すバインド関数の登録
-		5,root.mainloo()でTkメインループの呼び出し
+		1,Tkルートオブジェクトを生成し、self.rootに格納する。
+		2,実際にこれに制御を渡すのはーすなわち、self.root.mainloop()を呼ぶのは、そのGUI要素の格納と、それについてのデータの設定を行う個々のsetting()メソッドにおいてである。
+		3,最後(ユーザーからの入力終了時)にそのsetting()メソッドに関連付けられたdone()メソッドがよばれ、ここで実際の設定プロセスおよびエラー処理と、rootのdestroy()すなわち、制御の返し処理が行われる。
 		"""
-		if not isinstance(parent,(BASE_BOX,Root_Container)) :
+		if not isinstance(parent,(BASE_BOX,Root_Container,Stock_Chart)) :
 			raise TypeError("引数がBOXオブジェクトあるいはRoot_Containerオブジェクトでありません")
 		self.parent = parent	#呼び出し元オブジェクト
 		event_attrs = {"from":self}
 		self.dummy_event = pygame.event.Event(pygame.USEREVENT,event_attrs)	#ダミーのイベントオブジェクト
-
 		#Tkの呼び出し
 		self.root = Tk.Tk()	#Tkのルートウィンドウ
 		self.root.title("設定画面")
+
+	def additional_chart_setting(self):
+		"""
+		チャートについてのオプショナルな要素についての追加設定用画面
+		"""
+		if not isinstance(self.parent,Stock_Chart) :
+			raise TypeError("Stock_Chartオブジェクト以外からの呼び出しです。")
+		pass
+
+	def done_additional_setting(self,Nouse):
+		"""
+		追加設定終了時の完了メソッド
+		"""
+		self.root.destroy()	#Tkルートウィンドウを破棄
+
+	def initial_chart_setting(self):
+		"""
+		チャート設定についての初期化設定画面。
+		銘柄コード、ダウンロードモード、ダウンロードサイトについての設定を行う。
+		"""
+		#ROOTかBOXオブジェクトから呼ばれるべき
+		if not isinstance(self.parent,(BASE_BOX,Root_Container)) :
+			raise TypeError("引数がBOXオブジェクトあるいはRoot_Containerオブジェクトでありません")
+
 		#TkVariables
 		self.security_code_Tkvar = Tk.StringVar()
-		self.term_for_a_bar_Tkvar=Tk.IntVar()
-		self.term_for_a_bar_Tkvar.set(3)
+		self.term_for_a_bar_Tkvar = Tk.IntVar()
 		self.download_mode_Tkvar = Tk.IntVar()
-		self.download_mode_Tkvar.set(1)
+		self.download_site_Tkvar = Tk.IntVar()
+		#デフォルト値の設定
+		self.term_for_a_bar_Tkvar.set(TERM_DICT["日足"])
+		self.download_mode_Tkvar.set(DOWNLOAD_MODE_LOCAL)
+		self.download_site_Tkvar.set(DOWNLOAD_SITE_KDB)
 		#TkWidgets
 		#Entry:証券コード入力欄
 		security_code_entry = Tk.Entry(self.root,textvariable=self.security_code_Tkvar)	
 		security_code_entry.pack()
 		security_code_entry.focus()
-		security_code_entry.bind("<Return>",self.done)
-		#Radiobutton:データダウンロードについてのオプション
-		optional_information_radiobutton_labelframe = Tk.LabelFrame(self.root,text="オプショナルな設定")
-		optional_information_radiobutton_labelframe.pack()
-		Tk.Radiobutton(optional_information_radiobutton_labelframe,text="ローカルモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
-		Tk.Radiobutton(optional_information_radiobutton_labelframe,text="差分モード:kdb.com",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_KDB).pack(side="left")
+		security_code_entry.bind("<Return>",self.done_initial_setting)
+		#Radiobutton:データダウンロードについてのモード選択
+		download_mode_radiobutton_labelframe = Tk.LabelFrame(self.root,text="ダウンロードモードの設定")
+		download_mode_radiobutton_labelframe.pack()
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="ローカルモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="差分モード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DIFF).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="通常ダウンロード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DOWNLOAD).pack(side="left")
+		#Radiobutton:データダウンロードについてのサイト選択
+		download_site_radiobutton_labelframe = Tk.LabelFrame(self.root,text="データの参照先")
+		download_site_radiobutton_labelframe.pack()
+		Tk.Radiobutton(download_site_radiobutton_labelframe,text="k-db.com",variable=self.download_site_Tkvar,value=DOWNLOAD_SITE_KDB).pack(side="left")
 		#Radiobutton:足ごとの期間の設定ボタン
 		term_for_a_bar_radiobutton_labelframe=Tk.LabelFrame(self.root,text="１足あたりの期間")	#足期間設定フレーム
 		term_for_a_bar_radiobutton_labelframe.pack()
 		for term in TERM_LIST :
 			Tk.Radiobutton(term_for_a_bar_radiobutton_labelframe,text=term,value=TERM_DICT[term],variable=self.term_for_a_bar_Tkvar).pack(side="left")
 		#Button:OKボタン
-		Tk.Button(self.root,text="done",command=self.done).pack()	#Button:入力終了時self.done()が呼ばれる。
+		Tk.Button(self.root,text="done",command=self.done_initial_setting).pack()	#Button:入力終了時self.done()が呼ばれる。
 		#Tk main_loop
 		self.root.mainloop()
 
-	def done(self,NoUse=None):
+	def done_initial_setting(self,NoUse=None):
 		"""
 		ユーザーによる情報入力完了時に呼び出されるメソッドで、証券コードチェックの後、株価情報のフェッチと保存をし、フェッチしたCSVデータに問題がなければ、チャート描画のためのオブジェクトの作成を行う。
 
@@ -2044,11 +2153,12 @@ class Setting_Tk_Dialog(object):
 		security_code = self.security_code_Tkvar.get()	#証券コード入力エントリー
 		term_num = self.term_for_a_bar_Tkvar.get()	#足期間
 		download_mode = self.download_mode_Tkvar.get()
+		download_site = self.download_site_Tkvar.get()
 		#証券コードのチェック
 		if security_code.isdigit() and int(math.log10(int(security_code))+1) == 4 :
 			#stock_chartオブジェクト、tabオブジェクトの生成と初期設定
 			tab = Tab()
-			stock_chart_object = Stock_Chart(security_code,term_num,download_mode) #CSVをフェッチし、データを保持するオブジェクト
+			stock_chart_object = Stock_Chart(security_code,term_num,download_mode,site=download_site) #CSVをフェッチし、データを保持するオブジェクト
 			stock_chart_object.set_tab(tab)
 			#株価CSVデータのフェッチと保存が成功したらTkrootウィンドウを破棄し、
 			if stock_chart_object.download_price_data() :
@@ -2060,8 +2170,10 @@ class Setting_Tk_Dialog(object):
 				term_button.dispatch_MOUSEBUTTONDOWN(self.dummy_event)
 
 				self.root.destroy()	#Tkルートウィンドウを破棄
+			else :
+				print "データのダウンロードに失敗しました"
 		else :
-			tkMessageBox.showerror(message="証券コード：数字4桁を入力してください。")
+			tkMessageBox.showerror(message="証券コード：正しい数字4桁を入力してください。")
 
 
 #General Functions-----
