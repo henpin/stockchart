@@ -41,7 +41,6 @@ TERM2URL_DICT = {"日足":"","前場後場":"a","5分足":"5min","1分足":"minu
 BUTTON_SIZE = (40,30)
 FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
 BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
-#Changed by windows - ダウンロードモードと、サイト設定
 DOWNLOAD_MODE_LOCAL = 1
 DOWNLOAD_MODE_DIFF = 2
 DOWNLOAD_MODE_DOWNLOAD = 3
@@ -161,7 +160,6 @@ class Root_Container():
 		self.fill_background()
 		add_default_buttons(self)	#デフォルトのボタンを配置
 		add_default_labels(self)	#デフォルトラベルの配置
-		#設定画面の呼び出し:Changed_by_Windows
 		Setting_Tk_Dialog(self).initial_chart_setting()	
 	
 	def add_box(self,child):
@@ -925,7 +923,6 @@ class Stock_Chart(Content):
 
 	エラー文の出力は、処理階層における末端の処理部分が担う。それより下は単にFalseを階層的に返し続け、呼び出しもとにそれを返す。
 	"""
-	#Changed_by_Windows ダウンロードサイトの保存
 	def __init__(self,security_code,term_num,download_mode,site=DOWNLOAD_SITE_ETC):
 		"""
 		"""
@@ -953,7 +950,7 @@ class Stock_Chart(Content):
 		self.horizontal_rulers = []	#価格を表す水平ルーラーのリスト
 		self.moving_averages = []	#移動平均オブジェクトのリスト
 
-		#Changed-データの保存とフェッチに関するメタ情報を格納するメンバ変数
+		#データの保存とフェッチに関するメタ情報を格納するメンバ変数
 		self.download_mode = download_mode	#ローカル環境に株価データがあればそれを用いる
 		self.download_site = site
 		self.file_header = []	#ローカルファイルに保存するためのファイルヘッダ
@@ -1039,7 +1036,6 @@ class Stock_Chart(Content):
 			return True	#もはやダウンロードの必要はない。制御を返す。
 		#Tabになかったらフェッチし、保存する。
 		self.stock_price_list = []	#初期化
-		#Changed_by_Windows - ダウンロードモード機構の変更:モードとサイトの２重構造にする : エラーの定義。その他コードの整備---------------
 		#定義されたダウンロードモードに基づく処理の分岐
 		if self.download_mode == DOWNLOAD_MODE_LOCAL :
 			#ローカルモード
@@ -1061,7 +1057,6 @@ class Stock_Chart(Content):
 				return False
 		else :
 			raise Exception("未定義のモードです")
-		#--------------------------------------------------------------
 		#最後のエラー補足。株価データが正常かを確認
 		if not self.stock_price_list :
 			return False
@@ -1073,20 +1068,6 @@ class Stock_Chart(Content):
 
 		return True
 
-	#Changed_by_Windows - オンラインからフェッチする際の新たな中間インターフェイス。ここでファイル種差を吸収しようという魂胆
-	def download_price_data_from_web(self):
-		"""
-		オンラインからのデータのフェッチのための中間インターフェイス。諸所のサイトにおける種差はここで吸収する。
-		"""
-		if self.download_site == DOWNLOAD_SITE_KDB :
-			if not self.download_price_data_from_kdb() :
-				return False
-		else :
-			raise Exception("未定義のサイトです")
-		self.save_csv_to_local()
-		return True
-
-	#Changed ファイルのインポートに関する条件文の上層からの移設	
 	def download_price_data_from_file(self):
 		"""
 		ローカルファイルから株価情報をインポートします。失敗すればFalseを返します
@@ -1117,7 +1098,18 @@ class Stock_Chart(Content):
 		filename = CSV_DIR + "/%s-T%s.csv" % (self.security_code,TERM2URL_DICT[TERM_DICT[self.term_for_csv]])
 		return filename
 
-	#Changed_by_Windows : エラー文の定義。save_csv_to_localの上層(=download_price_data_from_web)への移動。このメソッドはデータのフェッチと変換、格納だけを行うべき
+	def download_price_data_from_web(self):
+		"""
+		オンラインからのデータのフェッチのための中間インターフェイス。諸所のサイトにおける種差はここで吸収する。
+		"""
+		if self.download_site == DOWNLOAD_SITE_KDB :
+			if not self.download_price_data_from_kdb() :
+				return False
+		else :
+			raise Exception("未定義のサイトです")
+		self.save_csv_to_local()
+		return True
+
 	def download_price_data_from_kdb(self):
 		"""
 		k-db.comよりCSVデータのフェッチとその変換、格納を行う
@@ -1126,7 +1118,7 @@ class Stock_Chart(Content):
 		#urlの設定
 		if TERM_DICT[self.term_for_csv] in ("日足","前場後場") :
 			url_term_phrase = TERM2URL_DICT[TERM_DICT[self.term_for_csv]]
-			if url_term_phrase :	
+			if url_term_phrase :
 				url_term_phrase = "/" + url_term_phrase
 			for year in range(2016,2012,-1) :
 				url = "http://www.k-db.com/stocks/%s-T%s?year=%d&download=csv" % (self.security_code,url_term_phrase,year)
@@ -1134,9 +1126,8 @@ class Stock_Chart(Content):
 		else :
 			url_list = self.get_urls(self.term_for_csv)
 			if url_list == False :
-				#Changed
 				tkMessageBox.showerror(message="kdb.comについて、分足のデータに関するurlの自動補足ができませんでした。")
-				return False	
+				return False
 		#CSVのフェッチとコンバート、保存を行い、何らかのエラーが出た時にはFalseを返す。
 		for url in url_list:
 			if not self.fetch_csv(url):
@@ -1226,7 +1217,6 @@ class Stock_Chart(Content):
 			tkMessageBox.showerror(message="%s : CSVのダウンロードに失敗しました。"%(url))
 			return False
 		csv_text = unicode(respose.read(),"Shift-Jis").encode("utf-8")	#Shift-JisからUnicode文字列へ
-		#Changed - Debugについての再定義
 		if DEBUG_MODE :
 			print csv_text
 			debug_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),"debug.txt")
@@ -1260,7 +1250,7 @@ class Stock_Chart(Content):
 					return False
 				else: 
 					self.security_name = tmp_list[2]
-					if not line in self.file_header :	
+					if not line in self.file_header :
 						self.file_header.append(line)
 					i+=1
 					continue
@@ -1901,7 +1891,6 @@ class Stock_Chart(Content):
 		"""
 		このオブジェクトの「銘柄コード」、「銘柄名」、「Tab」を継承(共有)する新たなStock_Chartオブジェクトを返す。
 		"""
-		#Changed_by_Windows 
 		brother = Stock_Chart(self.security_code,term_num,self.download_mode,self.download_site)	#兄弟に当たる新しいオブジェクト
 		brother.security_name = self.security_name
 		tab = self.get_tab()
@@ -2070,6 +2059,7 @@ class Get_Url_Parser(HTMLParser):
 class Setting_Tk_Dialog(object):
 	"""
 	ユーザーに銘柄コードの入力と、チャートについての設定を求めるダイアログを生成し、実際に株価データを保持するオブジェクトの生成、またはそのオブジェクトへの表示領域の提供を行うためのインターフェイスとしてのクラスです。
+	
 	1,このクラスのオブジェクトが生成されると、内部でTkのルートオブジェクトを生成し、このオブジェクトのrootメンバ変数に格納します。
 	2,外からこのオブジェクトのsettingメソッドが呼ばれると、適当なGUI要素を格納した、Tkのwindowが生成され、これがこのプログラムのメインループを占有します。
 	3,ユーザーによる入力が完了すると、呼び出されたsettingメソッドに対応するdoneメソッドが呼び出され、実際に株価データのフェッチ、コンバート、保持を行うStock_Chartオブジェクトを生成したり、あるいは既存のそれに対するいくつかの設定を行います。
@@ -2088,7 +2078,6 @@ class Setting_Tk_Dialog(object):
 		2,実際にこれに制御を渡すのはーすなわち、self.root.mainloop()を呼ぶのは、そのGUI要素の格納と、それについてのデータの設定を行う個々のsetting()メソッドにおいてである。
 		3,最後(ユーザーからの入力終了時)にそのsetting()メソッドに関連付けられたdone()メソッドがよばれ、ここで実際の設定プロセスおよびエラー処理と、rootのdestroy()すなわち、制御の返し処理が行われる。
 		"""
-		#Changed_by_Windows isinstanceの修正。チェック機構はそれぞれのsettingメソッドに拡張する
 		if not isinstance(parent,(BASE_BOX,Root_Container,Stock_Chart)) :
 			raise TypeError("引数がBOXオブジェクトあるいはRoot_Containerオブジェクトでありません")
 		self.parent = parent	#呼び出し元オブジェクト
@@ -2099,7 +2088,6 @@ class Setting_Tk_Dialog(object):
 		self.root = Tk.Tk()	#Tkのルートウィンドウ
 		self.root.title("設定画面")
 
-	#Changed_by_Windows 
 	def additional_chart_setting(self):
 		"""
 		チャートについての追加設定用画面
@@ -2113,9 +2101,7 @@ class Setting_Tk_Dialog(object):
 		追加設定終了時の完了メソッド
 		"""
 		self.root.destroy()	#Tkルートウィンドウを破棄
-		
 
-	#Changed_by_Windows Setting_Tk_Dialogオブジェクトの枠組みの変革。オブジェクトの生成側が、明示的に呼び出すようにする。
 	def initial_chart_setting(self):
 		"""
 		チャート設定についての初期化設定画面。
@@ -2125,23 +2111,19 @@ class Setting_Tk_Dialog(object):
 		if not isinstance(self.parent,(BASE_BOX,Root_Container)) :
 			raise TypeError("引数がBOXオブジェクトあるいはRoot_Containerオブジェクトでありません")
 		#TkVariables
-		#Changed_by_Windows　デフォルト値の設定に変数を使おう。
 		self.security_code_Tkvar = Tk.StringVar()
 		self.term_for_a_bar_Tkvar=Tk.IntVar()
 		self.term_for_a_bar_Tkvar.set(TERM_DICT["日足"])
 		self.download_mode_Tkvar = Tk.IntVar()
 		self.download_mode_Tkvar.set(DOWNLOAD_MODE_LOCAL)
+		self.download_site_Tkvar = Tk.IntVar()
+		self.download_site_Tkvar.set(DOWNLOAD_SITE_KDB)
 		#TkWidgets
 		#Entry:証券コード入力欄
 		security_code_entry = Tk.Entry(self.root,textvariable=self.security_code_Tkvar)	
 		security_code_entry.pack()
 		security_code_entry.focus()
 		security_code_entry.bind("<Return>",self.done_initial_setting)
-
-		#Changed_by_Windows - ダウンロードモードとサイトの選択機構の変更----------------
-		#また、ローカルの場合は関数にバインドさせてサイト設定要素を無効にすべき。
-		self.download_site_Tkvar = Tk.IntVar()
-		self.download_site_Tkvar.set(DOWNLOAD_SITE_KDB)
 		#Radiobutton:データダウンロードについてのモード選択
 		download_mode_radiobutton_labelframe = Tk.LabelFrame(self.root,text="ダウンロードモードの設定")
 		download_mode_radiobutton_labelframe.pack()
@@ -2152,9 +2134,6 @@ class Setting_Tk_Dialog(object):
 		download_site_radiobutton_labelframe = Tk.LabelFrame(self.root,text="データの参照先")
 		download_site_radiobutton_labelframe.pack()
 		Tk.Radiobutton(download_site_radiobutton_labelframe,text="kdb.com",variable=self.download_site_Tkvar,value=DOWNLOAD_SITE_KDB).pack(side="left")
-
-		#--------------------------------
-
 		#Radiobutton:足ごとの期間の設定ボタン
 		term_for_a_bar_radiobutton_labelframe=Tk.LabelFrame(self.root,text="１足あたりの期間")	#足期間設定フレーム
 		term_for_a_bar_radiobutton_labelframe.pack()
@@ -2195,7 +2174,7 @@ class Setting_Tk_Dialog(object):
 
 				self.root.destroy()	#Tkルートウィンドウを破棄
 			else :
-				tkMessageBox.showerror(message="データのダウンロードに失敗しました。")
+				print "データのダウンロードに失敗しました"
 		else :
 			tkMessageBox.showerror(message="証券コード：正しい数字4桁を入力してください。")
 
