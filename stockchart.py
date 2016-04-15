@@ -47,10 +47,13 @@ DOWNLOAD_MODE_DOWNLOAD = 3
 DOWNLOAD_MODE_ETC = 4
 DOWNLOAD_SITE_KDB = 10
 DOWNLOAD_SITE_ETC = 100
-
 #Globals------
 DEBUG_MODE = 0
 CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
+DEFAULT_MA_DAYS_ALL = (3,5,25,75,135,200)
+DEFAULT_MA_DAYS_DAILY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)),(75,(0,255,0)),(135,(0,255,100)),(200,False) )	#((day,Color(=visible)),...)の書式
+DEFAULT_MA_DAYS_WEEEKLY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)),(75,(0,255,0)),(135,(0,255,100)) )
+DEFAULT_MA_DAYS_MINUTELY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)) )
 
 
 #Class-----
@@ -256,22 +259,18 @@ class Root_Container():
 		if box != self.get_focused_box() :
 			self.prefocused_box = self.get_focused_box()
 			self._focused_box = box
-#			self.dispatch_button_symchro_event()
+			self.synchronize_button_state()
 
-	def dispatch_button_symchro_event(self):
+	def synchronize_button_state(self):
 		"""
-		フォーカス移動時、コンテンツの設定内容をボタンに共有する。
-		ダミーイベントに共有する状態を付与して目的のボタンのあるボタンBOXにそのユーザー定義のイベントを流して、目的のボタンに情報を共有する
+		ボタン状態の同期を行う。実際の同期処理は、UI_Buttonクラスのインスタンスのcall_synchro_function()によって行われる。
 		"""
-		id_str = "synchronous"
-		target_button_box = self.get_button_box(id_str)
-		focused_content = self.get_focused_box().get_content()
-		#Y軸固定オプション値についてのシンクロ
-		dummy.target_id = "Y-prefix"
-		dummy.state = focused_content.get_Y_axis_fixed()
-		target_button_box.dispatch_synchro_event()
-		#etc
-		raise Exception("使うかどうか未定")
+		buttonbox = self.get_button_box("buttons_for_chart_setting")
+		for button in buttonbox.get_all_buttons() :
+			if isinstance(button,UI_Button) :
+				#トグル可能なボタンなら
+				button.call_synchro_function()
+		buttonbox.draw()
 
 	def get_all_container_box(self):
 		box_list = []
@@ -531,7 +530,7 @@ class Button_Box(BASE_BOX):
 		self._left_top = (0,0)	#この値はRoot_Containerオブジェクトによってのみ設定可能
 	
 	def add_button(self,button_object):
-		if isinstance(button_object,(UI_Button,Label_of_ButtonBox)):
+		if isinstance(button_object,(Content_of_ButtonBox)):
 			self.button_list.append(button_object)
 			button_object.set_parent_box(self)
 		else:
@@ -542,6 +541,12 @@ class Button_Box(BASE_BOX):
 			if button.id == id :
 				return button
 		raise Exception("id,%s を持つBUttonオブジェクトはありません"%(id_str))
+
+	def get_all_buttons(self):
+		"""
+		このBOXオブジェクトの格納するボタンオブジェクトのリストself.button_listを返すインターフェイス。
+		"""
+		return self.button_list
 
 	def draw(self):
 		"""
@@ -671,7 +676,8 @@ class UI_Button(Content_of_ButtonBox):
 		self.command = command	#ボタンが押された時に起動する関数オブジェクト
 		self.state = False	#押されているかいないか
 		#以下の3つのプロパティはButton_Boxオブジェクトにより描画時、動的に与えられる。また、具体地は親のset_size()を用いる
-		self._left_top , _width , _height= (0,0) , 0 , 0	
+		self._left_top , _width , _height= (0,0) , 0 , 0
+		self.synchronize_with_focuse_content = None	#ボタンstate同期用の関数。self.set_synchro_function()で設定する。
 
 	def draw(self,target_surface,left_top,font):
 		"""
@@ -686,17 +692,45 @@ class UI_Button(Content_of_ButtonBox):
 		w , h = surface.get_width() , surface.get_height()
 		self.set_size(left_top,w,h)
 
+	def set_synchro_function(self,func):
+		"""
+		状態同期の為の関数の定義の為のインターフェイス。
+		"""
+		self.synchronize_with_focuse_content = func
+
+	def call_synchro_function(self):
+		"""
+		定義された状態同期の為の関数の呼び出し。
+		未定義ならFalse値を返し、さもなくばシンクロ関数をコールし、また、その返り値のいかんに問わずTrue値を返す。
+		"""
+		if self.synchronize_with_focuse_content :
+			self.synchronize_with_focuse_content(self)
+			return True
+		else :
+			return False
+
+	def set_state(self,state):
+		self.state = state
+
+	def get_state(self):
+		return self.state
+
+	def switch_state(self):
+		"""
+		ボタンの状態を変える-逆転させる。
+		"""
+		self.state = not self.state
+
 	def dispatch_MOUSEBUTTONDOWN(self,event):
 		"""
 		ボタンの状態を変える前に定義されたコマンドを実行し、そのコマンドが正常に実行されたら、ボタンの状態を変える。
 		"""
 		if event.type == pygame.USEREVENT : 
-			#ボタンの状態を変更
-			self.state = not self.state
+			self.switch_state()
 		else : 
 			success = self.command(self) 
 			if success :
-				self.state = not self.state
+				self.switch_state()
 		self.get_parent_box().draw()
 
 
@@ -831,6 +865,12 @@ class Moving_Average(object):
 		#移動平均値の算出と格納
 		self.calc()
 
+	def get_MA_days(self):
+		"""
+		何日の移動平均を表現するオブジェクトかを返すインターフェイス
+		"""
+		return self.days
+
 	def set_visible(self,visible=True):
 		self.visible = visible
 
@@ -854,7 +894,7 @@ class Moving_Average(object):
 				#price_listとindex値を完全に同期する為に0を加えておく
 				f(0)
 			else :
-				start , end = list_index-self.days , list_index
+				start , end = list_index-self.days+1 , list_index
 				#今のlist_indexからself.days前までにおける、(0でない)(定義された価格種類の)価格値を集計する。
 				moving_prices = [ a_price_list[target_index] for a_price_list in price_list[start:end+1] if a_price_list[target_index] ]
 
@@ -881,6 +921,54 @@ class Moving_Average(object):
 		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
 		f = ( lambda  index,price : ( self.parent.get_index2pos_x(index) , self.parent.price_to_height(price) ) )
 		point_list = [ f(index,self.MAlist[index]) for index in range(start,end+1) if self.MAlist[index] ]
+		pygame.draw.aalines(surface,self.color,False,point_list)
+
+
+class Actual_Account_Analyser(object):
+	"""
+	株の「実質的価値」を分析、描画するためのクラス。
+	中身は単純で、２つ以上の移動平均情報からその平均値を算出するだけ。
+	だが少なくともただ１通りの情報から端的に算出された指標よりも、重み分けのなされたより多くの情報源から算出された指標のほうが信ぴょう性は認め得よう。
+	"""
+	def __init__(self,parent,color,visible=True):
+		if not isinstance(parent,Stock_Chart) :
+			raise Exception("親コンテンツオブジェクトが不正な型です")
+		self.parent = parent
+		self.color = color
+		self.visible = visible
+		self.AAlist = ()
+		self.least_numof_MA = 3		#実質的価値の算出に最低限３つはMAのデータがほしい
+
+	def get_actual_account(self,index):
+		"""
+		"""
+		return self.AAlist[index]
+		pass
+	
+	def calc(self,MAlist):
+		"""
+		"""
+		AAlist = []
+		endindex = len(self.parent.stock_price_list)
+		numof_MA = len(MAlist)
+		for index in range(endindex+1) :
+			MA_values = [ MAlist[i].get_MA(index) for i in range(numof_MA) if MAlist[i].get_MA(index) ]
+			numof_val = len(MA_values)
+			if numof_val >= self.least_numof_MA :
+				actual_account_price = sum(MA_values) / float(numof_val)
+				AAlist.append(int(actual_account_price))
+			else :
+				AAlist.append(0)	#無効な値として0を定義
+
+		self.AAlist = tuple(AAlist)	#Tuple化して登録
+
+	def draw_to_surface(self,surface):
+		"""
+		"""
+		start , end = self.parent.get_drawing_index()
+		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
+		f = ( lambda  index,price : ( self.parent.get_index2pos_x(index) , self.parent.price_to_height(price) ) )
+		point_list = [ f(index,self.AAlist[index]) for index in range(start,end+1) if self.AAlist[index] ]
 		pygame.draw.aalines(surface,self.color,False,point_list)
 
 
@@ -948,6 +1036,7 @@ class Stock_Chart(Content):
 		self._highlight_index = 0	#ハイライト表示
 		self.horizontal_rulers = []	#価格を表す水平ルーラーのリスト
 		self.moving_averages = []	#移動平均オブジェクトのリスト
+		self.AA_analyser = None		#実質的価値の解析オブジェクト
 
 		#データの保存とフェッチに関するメタ情報を格納するメンバ変数
 		self.download_mode = download_mode	#ローカル環境に株価データがあればそれを用いる
@@ -960,6 +1049,12 @@ class Stock_Chart(Content):
 		#初期化関数
 		self.set_term(term_num)	#２つのterm変数のセッターメソッド
 		self.set_zoom_scale()	#ズームスケールのデフォルト値の設定
+
+	def get_moving_averages(self):
+		"""
+		関連付けられた移動平均オブジェクトのリストself.moving_averagesを返すインターフェイス。
+		"""
+		return self.moving_averages
 
 	def set_zoom_scale(self,scale=None):
 		"""
@@ -1064,6 +1159,9 @@ class Stock_Chart(Content):
 		#週足、月足についてはtabを介して変換されたデータを得る。
 		if TERM_DICT[self.term_for_a_bar] in ("週足","月足") :
 			self.read_from_tab()
+		#チャート上オシレーターの初期化
+		self.set_default_moving_averages()
+		self.set_AA_analyser()
 
 		return True
 	
@@ -1376,6 +1474,8 @@ class Stock_Chart(Content):
 		surface_drawn_candle = self.draw_candle(surface_size)
 		#移動平均線の描画
 		surface_drawn_moving_average = self.draw_moving_average(surface_size)
+		#実質的価値表現線の描画
+		surface_drawn_actual_account = self.draw_actual_account(surface_size)
 		#出来高の描画
 		surface_drawn_turnover = self.draw_turnover(surface_size,font)
 		#座標の線などその他要素の描画
@@ -1397,6 +1497,7 @@ class Stock_Chart(Content):
 		surface.blit(surface_drawn_horizontal_rulers,(0,0))
 		surface.blit(surface_drawn_candle,(0,0))
 		surface.blit(surface_drawn_moving_average,(0,0))
+		surface.blit(surface_drawn_actual_account,(0,0))
 
 	def get_drawing_size(self):
 		zoom_scale = self.get_zoom_scale()
@@ -1462,15 +1563,16 @@ class Stock_Chart(Content):
 		"""
 		self.moving_averages = []	#初期化
 		if TERM_DICT[self.term_for_a_bar] in ("日足","前場後場") :
-			short_MA = Moving_Average(self,5,"C",(255,0,0))
-			middle_MA = Moving_Average(self,25,"C",(0,0,255))
-			long_MA =Moving_Average(self,75,"C",(0,255,0))
-			morelong_MA =Moving_Average(self,135,"C",(255,255,0))
-
-			self.moving_averages.append(short_MA)
-			self.moving_averages.append(middle_MA)
-			self.moving_averages.append(long_MA)
-			self.moving_averages.append(morelong_MA)
+			ma_days = DEFAULT_MA_DAYS_DAILY
+		elif TERM_DICT[self.term_for_a_bar] in ("1分足","5分足") :
+			ma_days = DEFAULT_MA_DAYS_MINUTELY
+		elif TERM_DICT[self.term_for_a_bar] in ("週足") :
+			ma_days = DEFAULT_MA_DAYS_WEEEKLY
+		for day,color in ma_days :
+			MA = Moving_Average( self,day,"C",(color or (0,0,0)) )
+			if not color :
+				MA.set_imvisible()
+			self.moving_averages.append(MA)
 
 	def draw_moving_average(self,surface_size):
 		"""
@@ -1479,12 +1581,34 @@ class Stock_Chart(Content):
 		"""
 		surface = self.get_surface(surface_size)
 		start_index , end_index = self.get_drawing_index()
-		if not self.moving_averages:
-			self.set_default_moving_averages()
 		#移動平均値の算出と描画
 		for MA in self.moving_averages :
 			if MA.is_visible() :
 				MA.draw_to_surface(surface)
+
+		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
+		return flipped_surface
+
+	def set_AA_analyser(self) :
+		"""
+		実質的価値の分析を担当するActual_Account_Analyserクラスを生成し、このオブジェクトに登録する。
+		また、このメソッド内でActual_Account_Analyserのcalc()を呼び出し、実質的価値を表す株価の算出もすます。
+		"""
+		if len(self.moving_averages) < 3 :
+			print "Error : 実質的価値の算出に用いる移動平均オブジェクトオブジェクトが十分な数Stock_Chartオブジェクトに登録されていません。"\
+				"\n実質的価値の算出を中止します。"
+			return False
+
+		color = (255,100,50)
+		AA_analyser = Actual_Account_Analyser(self,color)
+		AA_analyser.calc(self.moving_averages)
+		self.AA_analyser = AA_analyser
+
+	def draw_actual_account(self,surface_size):
+		"""
+		"""
+		surface = self.get_surface(surface_size)
+		self.AA_analyser.draw_to_surface(surface)
 
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
 		return flipped_surface
@@ -2192,20 +2316,24 @@ def add_default_buttons(root):
 	#チャートについての詳細設定
 	button_box = Button_Box(root,"buttons_for_chart_setting",bgcolor=(200,255,200))
 	button_box.add_button(Label_of_ButtonBox("チャート設定"))
-	button_informations = []	#(id_str,bind_function,swiching)の情報を格納する一時変数
-	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True) )
-	button_informations.append( ("Ruler-Default",pressed_set_ruler_default,False) )
-	for id_str , bind_function , swiching in button_informations :
+	button_informations = []	#(id_str,bind_function,swiching,synchro_func)の情報を格納する一時変数
+	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True,synchronize_Y_axis_fix) )
+	button_informations.append( ("Ruler-Default",pressed_set_ruler_default,False,None) )
+	#登録
+	for id_str , bind_function , swiching , synchro_func in button_informations :
 		if swiching :
 			button = UI_Button(id_str,id_str,bind_function)
+			if synchro_func :
+				button.set_synchro_function(synchro_func)
 		else:
 			button = No_Swith_Button(" "+id_str+" ",id_str,bind_function)
 		button_box.add_button(button)
 	#移動平均線についてのショートカット
-	for MA_days in [5,25,75,135]:
-		id_str = "MA-%d" % (MA_days)
-		label_str = "MA-%dday" % (MA_days)
+	for MA_day in DEFAULT_MA_DAYS_ALL :
+		id_str = "MA-%d" % (MA_day)
+		label_str = "MA-%dday" % (MA_day)
 		button = UI_Button(label_str,id_str,pressed_MA_setting_shortcut)
+		button.set_synchro_function(synchronize_MA)
 		button_box.add_button(button)
 
 	root.add_box(button_box)
@@ -2215,7 +2343,7 @@ def add_default_labels(root):
 	"""
 	label_box = Label_box(root)
 	label1 = Label(color=(255,0,0))
-	label2 = Label("現在時刻：",color=(0,0,255))
+	label2 = Label("Hello StockChart",color=(0,0,255))
 	label_box.add_label(label1)
 	label_box.add_label(label2)
 	root.add_box(label_box)
@@ -2281,6 +2409,32 @@ def pressed_MA_setting_shortcut(button):
 
 	focused_box.draw()
 	return True
+
+def synchronize_Y_axis_fix(button):
+	"""
+	フォーカスが移動したときに呼ばれるボタン状態シンクロ関数。Y軸固定オプションボタンについて定義。
+	"""
+	root = button.get_parent_box().get_father()
+	focused_content = root.get_focused_box().get_content()
+	if isinstance(focused_content,Stock_Chart) :
+		state = focused_content.get_Y_axis_fixed()
+		button.set_state(state)
+	else :
+		print "フォーカスの写ったオブジェクトがチャートオブジェクトでありません。"
+
+def synchronize_MA(button):
+	"""
+	フォーカスが移動したときに呼ばれるボタン状態シンクロ関数。移動平均設定ショートカットボタンについて定義。
+	"""
+	root = button.get_parent_box().get_father()
+	focused_content = root.get_focused_box().get_content()
+	if isinstance(focused_content,Stock_Chart) :
+		for MA in focused_content.get_moving_averages() :
+			if button.id == "MA-%d" % (MA.get_MA_days()) :
+				button.set_state(MA.is_visible())
+				break
+	else :
+		print "フォーカスの写ったオブジェクトがチャートオブジェクトでありません。"
 
 def get_human_readable(num):
 	"""
