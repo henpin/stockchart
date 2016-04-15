@@ -50,7 +50,6 @@ DOWNLOAD_SITE_ETC = 100
 #Globals------
 DEBUG_MODE = 0
 CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
-#Changed
 DEFAULT_MA_DAYS_ALL = (3,5,25,75,135,200)
 DEFAULT_MA_DAYS_DAILY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)),(75,(0,255,0)),(135,(0,255,100)),(200,False) )	#((day,Color(=visible)),...)の書式
 DEFAULT_MA_DAYS_WEEEKLY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)),(75,(0,255,0)),(135,(0,255,100)) )
@@ -260,10 +259,8 @@ class Root_Container():
 		if box != self.get_focused_box() :
 			self.prefocused_box = self.get_focused_box()
 			self._focused_box = box
-			#Changed-同期関数
 			self.synchronize_button_state()
 
-	#Changed-同期関数
 	def synchronize_button_state(self):
 		"""
 		ボタン状態の同期を行う。実際の同期処理は、UI_Buttonクラスのインスタンスのcall_synchro_function()によって行われる。
@@ -533,7 +530,6 @@ class Button_Box(BASE_BOX):
 		self._left_top = (0,0)	#この値はRoot_Containerオブジェクトによってのみ設定可能
 	
 	def add_button(self,button_object):
-		#Changed-Content_of_ButtonBoxでいいよね
 		if isinstance(button_object,(Content_of_ButtonBox)):
 			self.button_list.append(button_object)
 			button_object.set_parent_box(self)
@@ -545,8 +541,7 @@ class Button_Box(BASE_BOX):
 			if button.id == id :
 				return button
 		raise Exception("id,%s を持つBUttonオブジェクトはありません"%(id_str))
-		
-	#Changed - ボタンのインターフェイス
+
 	def get_all_buttons(self):
 		return self.button_list
 
@@ -679,7 +674,6 @@ class UI_Button(Content_of_ButtonBox):
 		self.state = False	#押されているかいないか
 		#以下の3つのプロパティはButton_Boxオブジェクトにより描画時、動的に与えられる。また、具体地は親のset_size()を用いる
 		self._left_top , _width , _height= (0,0) , 0 , 0
-		#Changed - ボタンの同期関数
 		self.synchronize_with_focuse_content = None	#ボタンstate同期用の関数。self.set_synchro_function()で設定する。
 
 	def draw(self,target_surface,left_top,font):
@@ -695,7 +689,6 @@ class UI_Button(Content_of_ButtonBox):
 		w , h = surface.get_width() , surface.get_height()
 		self.set_size(left_top,w,h)
 
-	#Changed - シンクロ関数についてのメソッド
 	def set_synchro_function(self,func):
 		"""
 		状態同期の為の関数の定義の為のインターフェイス。
@@ -712,8 +705,7 @@ class UI_Button(Content_of_ButtonBox):
 			return True
 		else :
 			return False
-	
-	#Changed -stateに関するメソッド
+
 	def set_state(self,state):
 		self.state = state
 
@@ -726,7 +718,6 @@ class UI_Button(Content_of_ButtonBox):
 		"""
 		self.state = not self.state
 
-	#changed - swich に基づくへんこう
 	def dispatch_MOUSEBUTTONDOWN(self,event):
 		"""
 		ボタンの状態を変える前に定義されたコマンドを実行し、そのコマンドが正常に実行されたら、ボタンの状態を変える。
@@ -867,11 +858,10 @@ class Moving_Average(object):
 		self.color = color	
 		self.visible = visible
 		self.MAlist = []	#移動平均値の保管リスト
-		self.least_days = round( self.days * 2/3 ) 	#指定日数の3/2以上のデータ数が確保できれば許容
+		self.least_days = round( self.days * 2/3 )	#指定日数の3/2以上のデータ数が確保できれば許容
 		#移動平均値の算出と格納
 		self.calc()
 
-	#Changed 日数を返すインターフェイス
 	def get_MA_days(self):
 		"""
 		何日の移動平均を表現するオブジェクトかを返すインターフェイス
@@ -901,7 +891,6 @@ class Moving_Average(object):
 				#price_listとindex値を完全に同期する為に0を加えておく
 				f(0)
 			else :
-				#Changed 改正
 				start , end = list_index-self.days+1 , list_index
 				#今のlist_indexからself.days前までにおける、(0でない)(定義された価格種類の)価格値を集計する。
 				moving_prices = [ a_price_list[target_index] for a_price_list in price_list[start:end+1] if a_price_list[target_index] ]
@@ -932,7 +921,6 @@ class Moving_Average(object):
 		pygame.draw.aalines(surface,self.color,False,point_list)
 
 
-#Changed - 実質的価値のクラス
 class Actual_Account_Analyser(object):
 	"""
 	株の「実質的価値」を分析、描画するためのクラス。
@@ -1059,7 +1047,6 @@ class Stock_Chart(Content):
 		self.set_term(term_num)	#２つのterm変数のセッターメソッド
 		self.set_zoom_scale()	#ズームスケールのデフォルト値の設定
 
-	#Changed - 移動平均のすべてを返す
 	def get_moving_averages(self):
 		"""
 		関連付けられた移動平均オブジェクトのリストを返すだけ
@@ -1483,7 +1470,6 @@ class Stock_Chart(Content):
 		surface_drawn_candle = self.draw_candle(surface_size)
 		#移動平均線の描画
 		surface_drawn_moving_average = self.draw_moving_average(surface_size)
-		#Changed
 		#実質的価値表現線の描画
 		surface_drawn_actual_account = self.draw_actual_account(surface_size)
 		#出来高の描画
@@ -1567,7 +1553,6 @@ class Stock_Chart(Content):
 		surface = pygame.transform.flip(surface,False,True)
 		return surface
 
-	#Changed - 定数の実装
 	def set_default_moving_averages(self):
 		"""
 		デフォルトの移動平均線の登録を行う
@@ -1592,7 +1577,6 @@ class Stock_Chart(Content):
 		"""
 		surface = self.get_surface(surface_size)
 		start_index , end_index = self.get_drawing_index()
-		#Changed MAのデフォルト設定は初期化処理部分に移動
 		#移動平均値の算出と描画
 		for MA in self.moving_averages :
 			if MA.is_visible() :
@@ -1601,7 +1585,6 @@ class Stock_Chart(Content):
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
 		return flipped_surface
 
-	#Changed 実質的価値の算出オブジェクトの設定
 	def set_AA_analyser(self) :
 		"""
 		実質的価値の分析を担当するActual_Account_Analyserクラスを生成し、このオブジェクトに登録する。
@@ -1617,7 +1600,6 @@ class Stock_Chart(Content):
 		AA_analyser.calc(self.moving_averages)
 		self.AA_analyser = AA_analyser
 
-	#Changed 実質的価値の描画
 	def draw_actual_account(self,surface_size):
 		"""
 		"""
@@ -2330,7 +2312,6 @@ def add_default_buttons(root):
 	#チャートについての詳細設定
 	button_box = Button_Box(root,"buttons_for_chart_setting",bgcolor=(200,255,200))
 	button_box.add_button(Label_of_ButtonBox("チャート設定"))
-	#Changed - シンクロ関数の設定
 	button_informations = []	#(id_str,bind_function,swiching,synchro_func)の情報を格納する一時変数
 	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True,synchronize_Y_axis_fix) )
 	button_informations.append( ("Ruler-Default",pressed_set_ruler_default,False,None) )
@@ -2343,7 +2324,6 @@ def add_default_buttons(root):
 		else:
 			button = No_Swith_Button(" "+id_str+" ",id_str,bind_function)
 		button_box.add_button(button)
-	#Changed - 定数を使ったMA設定と、シンクロ関数の定義
 	#移動平均線についてのショートカット
 	for MA_day in DEFAULT_MA_DAYS_ALL :
 		id_str = "MA-%d" % (MA_day)
@@ -2359,7 +2339,6 @@ def add_default_labels(root):
 	"""
 	label_box = Label_box(root)
 	label1 = Label(color=(255,0,0))
-	#Changed 調整
 	label2 = Label("Hello StockChart",color=(0,0,255))
 	label_box.add_label(label1)
 	label_box.add_label(label2)
@@ -2427,7 +2406,6 @@ def pressed_MA_setting_shortcut(button):
 	focused_box.draw()
 	return True
 
-#Changed シンクロ関数
 def synchronize_Y_axis_fix(button):
 	"""
 	フォーカスが移動したときに呼ばれるボタン状態シンクロ関数。Y軸固定オプションボタンについて定義。
