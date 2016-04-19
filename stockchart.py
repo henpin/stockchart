@@ -33,27 +33,40 @@ import tkMessageBox
 from datetime import date as Date
 from HTMLParser import HTMLParser
 
-#STATICS-----
+#Global STATICS-----
+#About Object Sizese
 SCREEN_SIZE = (1000,600)
+BUTTON_SIZE = (40,30)
+#About General Colors
+#FOREGROUND_COLOR = (224,235,235)
+#BACKGROUND_COLOR = (0,15,30)
+FOREGROUND_COLOR = (0,0,0)
+BACKGROUND_COLOR = (255,255,255)
+#About Chart Term
 TERM_LIST = "月足,週足,日足,前場後場,5分足,1分足".split(",")	#数字は半角
 TERM_DICT = dict( zip( (TERM_LIST+range(1,7)),(range(1,7)+TERM_LIST) ) )	#相互参照の列挙体としての辞書。 1:月足 2:週足 3:日足 4:前後場足 5:五分足 6:一分足
 TERM2URL_DICT = {"日足":"","前場後場":"a","5分足":"5min","1分足":"minutely"} 
-BUTTON_SIZE = (40,30)
+#About Local Files
 FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
 BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
+CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
+#About Download Mode
 DOWNLOAD_MODE_LOCAL = 1
 DOWNLOAD_MODE_DIFF = 2
 DOWNLOAD_MODE_DOWNLOAD = 3
 DOWNLOAD_MODE_ETC = 4
 DOWNLOAD_SITE_KDB = 10
 DOWNLOAD_SITE_ETC = 100
-#Globals------
-DEBUG_MODE = 0
-CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
+#About Lines On Chart
+AA_LINE_COLOR = (200,0,0)
+MA_COLOR_DICT = {3:(200,120,0),5:(235,0,235),25:(0,0,255),75:(153,235,27),135:(139,0,0),200:(0,235,235)}
 DEFAULT_MA_DAYS_ALL = (3,5,25,75,135,200)
-DEFAULT_MA_DAYS_DAILY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)),(75,(0,255,0)),(135,(0,255,100)),(200,False) )	#((day,Color(=visible)),...)の書式
-DEFAULT_MA_DAYS_WEEEKLY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)),(75,(0,255,0)),(135,(0,255,100)) )
-DEFAULT_MA_DAYS_MINUTELY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)) )
+f = ( lambda tup : tuple( [ (day,MA_COLOR_DICT[day],visible) for day,visible in tup ] ) )
+DEFAULT_MA_DAYS_DAILY = f( ((3,False),(5,False),(25,False),(75,False),(135,False),(200,False)) ) 
+DEFAULT_MA_DAYS_WEEEKLY = f( ((3,False),(5,False),(25,False),(75,False)) )
+DEFAULT_MA_DAYS_MINUTELY = f( ((3,False),(5,False),(25,False)) )
+#Optional
+DEBUG_MODE = 0
 
 
 #Class-----
@@ -90,6 +103,15 @@ class BASE_BOX():
 			return True
 		else :
 			return False
+	
+	def get_surface(self,surface_size=None,color_key=(255,255,255)):
+		"""
+		サーフェスを得る為のインターフェイス。
+		"""
+		surface = pygame.Surface(surface_size or self.get_size())
+#		surface.set_alpha(240)
+		surface.fill(BACKGROUND_COLOR)
+		return surface
 
 	def get_label_box(self,id_str) :
 		"""
@@ -146,7 +168,7 @@ class Root_Container():
 	def __init__(self):
 		#インスタンス変数
 		self.screen = pygame.display.get_surface()
-		self.background = (255,255,255)
+		self.background_color = BACKGROUND_COLOR
 		self.keys = pygame.key.get_pressed()	#キー入力の保存リスト、eventloop()で更新。
 		self.looping = True	#メインループのスイッチ
 		self.clock = pygame.time.Clock()
@@ -160,6 +182,7 @@ class Root_Container():
 		self.keys_control_chart = (pygame.K_LEFT,pygame.K_RIGHT,pygame.K_UP,pygame.K_DOWN)
 
 		#初期化処理
+		self.screen.set_colorkey(BACKGROUND_COLOR)
 		self.fill_background()
 		add_default_buttons(self)	#デフォルトのボタンを配置
 		add_default_labels(self)	#デフォルトラベルの配置
@@ -285,8 +308,8 @@ class Root_Container():
 				return box
 		raise Exception("識別子",id_str,"を持ったButton_boxオブジェクトは見つかりませんでした。")
 
-	def fill_background(self):
-		self.screen.fill(self.background)
+	def fill_background(self,rect=None):
+		self.screen.fill(self.background_color,rect)
 		pygame.display.update()
 
 	def draw(self):
@@ -382,8 +405,7 @@ class Label_box(BASE_BOX):
 		"""
 		left_top = self.get_left_top()
 		for label in self.label_list :
-			surface = pygame.Surface(self.get_size())
-			surface.fill((255,255,255))
+			surface = self.get_surface()
 			label.draw(surface)
 			self.get_father().screen.blit(surface,left_top)
 			left_top = (left_top[0],left_top[1]+label.height)
@@ -409,7 +431,7 @@ class Label(object):
 	def __init__(self,string=None,color=None,font=None) :
 		self.font = font or pygame.font.Font(FONT_NAME,15)	#文字の描画に用いられるフォント
 		self.initial_string = "セッティングにはKEYを押してください。"	#文字列非設定時のデフォルト値
-		self.color = color or (0,0,0)
+		self.color = color or (255,255,255)
 		self.string = string or self.initial_string	#実際に描画される文字列
 		self.height = 0	#フォントサイズから動的に決定される
 		self.MARGINE = 1
@@ -479,8 +501,7 @@ class Container_Box(BASE_BOX):
 		assigned_index引数は、足についての詳細な情報を表示する場合に、その対象となるローソク足を示すself.content.stock_price_listのインデックス値である。
 		"""
 		rect_on_root = self.get_rect()
-		surface = pygame.Surface(self.get_size())
-		surface.fill((255,255,255))
+		surface = self.get_surface()
 		if self.get_father().get_focused_box() == self:
 			rect_for_self = pygame.Rect((0,0),rect_on_root.size)
 			pygame.draw.rect(surface,(255,200,40),rect_for_self,5)
@@ -516,7 +537,7 @@ class Button_Box(BASE_BOX):
 	このBOXオブジェクトがイベントシグナルないし描画の呼び出しを受けたときは、このオブジェクトの有するボタンオブジェクト、すなわち、self.button_listリストに登録されているすべてのUI_Buttonオブジェクトの、draw()メソッドをそれぞれ呼び出し、実際に描画します。
 	"""
 	def __init__(self,parent,id_str,font=None,bgcolor=None):
-		self.bgcolor = bgcolor or (255,255,255)
+		self.bgcolor = bgcolor or BACKGROUND_COLOR
 		self.set_parent(parent)
 		self.button_list = []
 		self.font = font or pygame.font.Font(FONT_NAME,15)
@@ -552,7 +573,7 @@ class Button_Box(BASE_BOX):
 		"""
 		"""
 		rect = self.get_rect()
-		surface = pygame.Surface(self.get_size())
+		surface = self.get_surface()
 		surface.fill(self.bgcolor)
 		left_top = (self.MARGINE,self.MARGINE)	#細かい見た目の設定と、BOXサーフェスに対する貼り付け位置
 		#ボタンの描画
@@ -803,7 +824,7 @@ class Horizontal_Ruler(object):
 		このメソッドの呼び出し元は、このメソッド終了後、サーフェスをY軸方向にフリップするのでテキストは予めフリップしておく必要がある
 		"""
 		drawing_height = self.chart.price_to_height(self.price)
-		price_renderd = font.render(unicode(str(self.price),"utf-8"),False,(0,0,0))
+		price_renderd = font.render(unicode(str(self.price),"utf-8"),True,FOREGROUND_COLOR)
 		flipped = pygame.transform.flip(price_renderd,False,True)
 		drawing_price_renderd_H = drawing_height - (price_renderd.get_height()/2)
 		drawing_rect = pygame.Rect((0,drawing_price_renderd_H),price_renderd.get_size())
@@ -1559,10 +1580,10 @@ class Stock_Chart(Content):
 		padding_size = int(zoom_scale * 4)
 		return candle_width,padding_size
 	
-	def get_surface(self,surface_size,color_key=(255,255,255)):
+	def get_surface(self,surface_size,color_key=BACKGROUND_COLOR):
 		surface = pygame.Surface(surface_size)
 		surface.set_colorkey(color_key)
-		surface.fill((255,255,255))
+		surface.fill(BACKGROUND_COLOR)
 		return surface
 
 	def set_index_posX_table(self):
@@ -1622,9 +1643,9 @@ class Stock_Chart(Content):
 			ma_days = DEFAULT_MA_DAYS_MINUTELY
 		elif TERM_DICT[self.term_for_a_bar] in ("週足") :
 			ma_days = DEFAULT_MA_DAYS_WEEEKLY
-		for day,color in ma_days :
-			MA = Moving_Average( self,day,"C",(color or (0,0,0)) )
-			if not color :
+		for day,color,visible in ma_days :
+			MA = Moving_Average(self,day,"C",color)
+			if not visible :
 				MA.set_imvisible()
 			self.moving_averages.append(MA)
 
@@ -1854,7 +1875,7 @@ class Stock_Chart(Content):
 			right = right - renderd.get_width() - side_padding/2 
 			surface.blit(renderd,(right,v_padding))
 		for MA in self.moving_averages :
-			color = MA.color if MA.is_visible() else (0,0,0)
+			color = MA.color if MA.is_visible() else FOREGROUND_COLOR
 			days = "%d日移動平均" % (MA.days)
 			days = unicode(days,"utf-8")
 			renderd = font.render(days,True,color)
@@ -1916,8 +1937,8 @@ class Stock_Chart(Content):
 			low_price += 1	#もはや安値は意味しない
 		for i in range(low_price,high_price+axis_interval,axis_interval) :
 			pos_y = self.price_to_height(i)
-			pygame.draw.line(surface,(0,0,0),(0,pos_y),(surface_width,pos_y),1)	#横線
-			text_surface = font.render(str(i),False,(0,0,0))
+			pygame.draw.line(surface,FOREGROUND_COLOR,(0,pos_y),(surface_width,pos_y),1)	#横線
+			text_surface = font.render(str(i),True,FOREGROUND_COLOR)
 			text_size = font.size(str(i))
 			flipped_surface = pygame.transform.flip(text_surface,False,True)	#最後の座標の反転のため
 			surface.blit(flipped_surface,(surface_width-text_size[0],pos_y-text_size[1]))	#文字
@@ -2012,9 +2033,9 @@ class Stock_Chart(Content):
 		surface_height = surface.get_height()
 		pos_x = self.get_index2pos_x(index)
 		font_width,font_height = font.size(date_str)
-		text_surface = font.render(date_str,False,(0,0,0))
+		text_surface = font.render(date_str,False,FOREGROUND_COLOR)
 		line_end_Y = surface_height - font_height - 2
-		line_color = color if color else (0,0,0)	#デフォルトは黒
+		line_color = color or FOREGROUND_COLOR	#デフォルトは黒
 
 		pygame.draw.line(surface,line_color,(pos_x,0),(pos_x,line_end_Y),1)
 		surface.blit(text_surface,(pos_x-font_width/2,surface_height-font_height-1))
@@ -2356,7 +2377,7 @@ class Setting_Tk_Dialog(object):
 
 
 #General Functions-----
-
+#Initializations : Create and Set Default UI Objects
 def add_default_buttons(root):
 	"""
 	"""
@@ -2404,6 +2425,7 @@ def add_default_labels(root):
 	label_box.add_label(label2)
 	root.add_box(label_box)
 
+#Binded Functions associated with UI_BUTTON objects
 def pressed_term_button(button):
 	"""
 	Root_Container名義で新たなStock_Chartオブジェクトを、新たなContainer_Boxに配置して、それをrootの子BOXとして追加する。
@@ -2478,6 +2500,7 @@ def pressed_AA_button(button):
 	focused_box.draw()
 	return True
 
+#Synchronizing Functions : those will be call'd when focused-object is changed
 def synchronize_Y_axis_fix(button):
 	"""
 	フォーカスが移動したときに呼ばれるボタン状態シンクロ関数。Y軸固定オプションボタンについて定義。
@@ -2516,7 +2539,7 @@ def synchronize_AA(button):
 	else :
 		print "フォーカスの写ったオブジェクトがチャートオブジェクトでありません。"
 	
-
+#Ulils
 def get_human_readable(num):
 	"""
 	int値をとり、それをヒューマンリーダブルなunicode文字列に変換したものを返す。
