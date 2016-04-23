@@ -25,7 +25,7 @@
 7,UI_Button_Label:
 	
 """
-import math,sys,urllib2,os.path
+import math,sys,urllib2,os
 import pygame
 from pygame.locals import *
 import Tkinter as Tk
@@ -33,27 +33,41 @@ import tkMessageBox
 from datetime import date as Date
 from HTMLParser import HTMLParser
 
-#STATICS-----
+#Global STATICS-----
+#About Object Sizese
 SCREEN_SIZE = (1000,600)
+BUTTON_SIZE = (40,30)
+#About General Colors
+#FOREGROUND_COLOR = (224,235,235)
+#BACKGROUND_COLOR = (0,15,30)
+FOREGROUND_COLOR = (0,0,0)
+BACKGROUND_COLOR = (255,255,255)
+#About Chart Term
 TERM_LIST = "月足,週足,日足,前場後場,5分足,1分足".split(",")	#数字は半角
 TERM_DICT = dict( zip( (TERM_LIST+range(1,7)),(range(1,7)+TERM_LIST) ) )	#相互参照の列挙体としての辞書。 1:月足 2:週足 3:日足 4:前後場足 5:五分足 6:一分足
-TERM2URL_DICT = {"日足":"","前場後場":"a","5分足":"5min","1分足":"minutely"} 
-BUTTON_SIZE = (40,30)
+TERM2URL_DICT = {"日足":"1d","前場後場":"4h","5分足":"5min","1分足":"minutely"}
+#About Local Files
 FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
 BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
+CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
+#About Download Mode
 DOWNLOAD_MODE_LOCAL = 1
-DOWNLOAD_MODE_DIFF = 2
-DOWNLOAD_MODE_DOWNLOAD = 3
-DOWNLOAD_MODE_ETC = 4
+DOWNLOAD_MODE_AUTO = 2
+DOWNLOAD_MODE_DIFF = 3
+DOWNLOAD_MODE_DOWNLOAD = 4
+DOWNLOAD_MODE_ETC = 5
 DOWNLOAD_SITE_KDB = 10
 DOWNLOAD_SITE_ETC = 100
-#Globals------
-DEBUG_MODE = 0
-CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
+#About Lines On Chart
+AA_LINE_COLOR = (200,0,0)
+MA_COLOR_DICT = {3:(200,120,0),5:(235,0,235),25:(0,0,255),75:(153,235,27),135:(139,0,0),200:(0,235,235)}
 DEFAULT_MA_DAYS_ALL = (3,5,25,75,135,200)
-DEFAULT_MA_DAYS_DAILY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)),(75,(0,255,0)),(135,(0,255,100)),(200,False) )	#((day,Color(=visible)),...)の書式
-DEFAULT_MA_DAYS_WEEEKLY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)),(75,(0,255,0)),(135,(0,255,100)) )
-DEFAULT_MA_DAYS_MINUTELY = ( (3,False),(5,(255,0,0)),(25,(0,0,255)) )
+f = ( lambda tup : tuple( [ (day,MA_COLOR_DICT[day],visible) for day,visible in tup ] ) )
+DEFAULT_MA_DAYS_DAILY = f( ((3,False),(5,False),(25,False),(75,False),(135,False),(200,False)) ) 
+DEFAULT_MA_DAYS_WEEEKLY = f( ((3,False),(5,False),(25,False),(75,False)) )
+DEFAULT_MA_DAYS_MINUTELY = f( ((3,False),(5,False),(25,False)) )
+#Optional
+DEBUG_MODE = 0
 
 
 #Class-----
@@ -90,6 +104,17 @@ class BASE_BOX():
 			return True
 		else :
 			return False
+
+	def get_surface(self,surface_size=None,bgcolor=BACKGROUND_COLOR):
+		"""
+		サーフェスを得る為のインターフェイス。
+		サーフェスサイズは省略できる。省略した場合は、ルートコンテナによって設定されたBOXサイズ情報を参照し、そのBOXオブジェクトに与えられた描画領域そのものの大きさをもつサーフェスを返す。
+		背景色は任意のものを設定可能で、デフォルトでは背景色BACKGROUND_COLORに設定されている。
+		BOX単位での描画関数呼出をサポートするために背景の透過設定は許されていない。この場合ルートによる背景上書きが必要になるからである。
+		"""
+		surface = pygame.Surface(surface_size or self.get_size())
+		surface.fill(bgcolor)
+		return surface
 
 	def get_label_box(self,id_str) :
 		"""
@@ -146,7 +171,7 @@ class Root_Container():
 	def __init__(self):
 		#インスタンス変数
 		self.screen = pygame.display.get_surface()
-		self.background = (255,255,255)
+		self.background_color = BACKGROUND_COLOR
 		self.keys = pygame.key.get_pressed()	#キー入力の保存リスト、eventloop()で更新。
 		self.looping = True	#メインループのスイッチ
 		self.clock = pygame.time.Clock()
@@ -154,8 +179,6 @@ class Root_Container():
 		self.child_box_list = []	#すべてのGUI要素を含むリスト
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
-		event_dict = {"from":self}
-		self.dummy_event = pygame.event.Event(pygame.USEREVENT,event_dict)	#ダミーのイベントオブジェクト
 		#イベント用定数
 		self.keys_control_chart = (pygame.K_LEFT,pygame.K_RIGHT,pygame.K_UP,pygame.K_DOWN)
 
@@ -285,9 +308,9 @@ class Root_Container():
 				return box
 		raise Exception("識別子",id_str,"を持ったButton_boxオブジェクトは見つかりませんでした。")
 
-	def fill_background(self):
-		self.screen.fill(self.background)
-		pygame.display.update()
+	def fill_background(self,rect=None):
+		self.screen.fill(self.background_color,rect)
+		pygame.display.update(rect)
 
 	def draw(self):
 		for child_box in self.child_box_list:
@@ -354,6 +377,7 @@ class Label_box(BASE_BOX):
 		self._left_top = (0,0)	#Root_Containerオブジェクトによって動的に決定されます。
 		self._width = 0
 		self._height = 0
+		self.bgcolor = (255,255,255)
 
 	def add_label(self,label) :
 		if not isinstance(label,Label) :
@@ -382,8 +406,7 @@ class Label_box(BASE_BOX):
 		"""
 		left_top = self.get_left_top()
 		for label in self.label_list :
-			surface = pygame.Surface(self.get_size())
-			surface.fill((255,255,255))
+			surface = self.get_surface(bgcolor=self.bgcolor)
 			label.draw(surface)
 			self.get_father().screen.blit(surface,left_top)
 			left_top = (left_top[0],left_top[1]+label.height)
@@ -406,10 +429,10 @@ class Label(object):
 	2,描画に必要な範囲をフォントサイズから算出し、self.heightに格納
 	3,描画
 	"""
-	def __init__(self,string=None,color=None,font=None) :
+	def __init__(self,string=None,str_color=None,font=None) :
 		self.font = font or pygame.font.Font(FONT_NAME,15)	#文字の描画に用いられるフォント
 		self.initial_string = "セッティングにはKEYを押してください。"	#文字列非設定時のデフォルト値
-		self.color = color or (0,0,0)
+		self.str_color = str_color or (0,0,0)
 		self.string = string or self.initial_string	#実際に描画される文字列
 		self.height = 0	#フォントサイズから動的に決定される
 		self.MARGINE = 1
@@ -427,9 +450,11 @@ class Label(object):
 
 	def draw(self,surface) :
 		"""
+		与えられたサーフェスに、透明な文字列を描画する。
+		背景色については親BOXのLabel_BOXオブジェクトの属性値に拠る
 		"""
 		decoded = unicode(self.string,"utf-8")	#日本語の貼り付けにはデコードが必要。
-		text_surface = self.font.render(decoded,True,self.color)
+		text_surface = self.font.render(decoded,True,self.str_color)
 		surface.blit(text_surface,(20,self.MARGINE))
 
 	def dispatch_MOUSEMOTION(self,event) :
@@ -479,8 +504,7 @@ class Container_Box(BASE_BOX):
 		assigned_index引数は、足についての詳細な情報を表示する場合に、その対象となるローソク足を示すself.content.stock_price_listのインデックス値である。
 		"""
 		rect_on_root = self.get_rect()
-		surface = pygame.Surface(self.get_size())
-		surface.fill((255,255,255))
+		surface = self.get_surface()
 		if self.get_father().get_focused_box() == self:
 			rect_for_self = pygame.Rect((0,0),rect_on_root.size)
 			pygame.draw.rect(surface,(255,200,40),rect_for_self,5)
@@ -516,7 +540,7 @@ class Button_Box(BASE_BOX):
 	このBOXオブジェクトがイベントシグナルないし描画の呼び出しを受けたときは、このオブジェクトの有するボタンオブジェクト、すなわち、self.button_listリストに登録されているすべてのUI_Buttonオブジェクトの、draw()メソッドをそれぞれ呼び出し、実際に描画します。
 	"""
 	def __init__(self,parent,id_str,font=None,bgcolor=None):
-		self.bgcolor = bgcolor or (255,255,255)
+		self.bgcolor = bgcolor or BACKGROUND_COLOR
 		self.set_parent(parent)
 		self.button_list = []
 		self.font = font or pygame.font.Font(FONT_NAME,15)
@@ -552,8 +576,7 @@ class Button_Box(BASE_BOX):
 		"""
 		"""
 		rect = self.get_rect()
-		surface = pygame.Surface(self.get_size())
-		surface.fill(self.bgcolor)
+		surface = self.get_surface(bgcolor=self.bgcolor)
 		left_top = (self.MARGINE,self.MARGINE)	#細かい見た目の設定と、BOXサーフェスに対する貼り付け位置
 		#ボタンの描画
 		for button in self.button_list:
@@ -725,12 +748,9 @@ class UI_Button(Content_of_ButtonBox):
 		"""
 		ボタンの状態を変える前に定義されたコマンドを実行し、そのコマンドが正常に実行されたら、ボタンの状態を変える。
 		"""
-		if event.type == pygame.USEREVENT : 
+		success = self.command(self) 
+		if success :
 			self.switch_state()
-		else : 
-			success = self.command(self) 
-			if success :
-				self.switch_state()
 		self.get_parent_box().draw()
 
 
@@ -803,7 +823,7 @@ class Horizontal_Ruler(object):
 		このメソッドの呼び出し元は、このメソッド終了後、サーフェスをY軸方向にフリップするのでテキストは予めフリップしておく必要がある
 		"""
 		drawing_height = self.chart.price_to_height(self.price)
-		price_renderd = font.render(unicode(str(self.price),"utf-8"),False,(0,0,0))
+		price_renderd = font.render(unicode(str(self.price),"utf-8"),True,FOREGROUND_COLOR)
 		flipped = pygame.transform.flip(price_renderd,False,True)
 		drawing_price_renderd_H = drawing_height - (price_renderd.get_height()/2)
 		drawing_rect = pygame.Rect((0,drawing_price_renderd_H),price_renderd.get_size())
@@ -1041,19 +1061,19 @@ class Stock_Chart(Content):
 	3,DOWNLOAD_MODE_DOWNLOAD:ローカルのファイルのいかんに問わず、データを指定されたさいとからフェッチする。
 	続いて、実際のデータのインクルードが行われる。ローカルからのインクルードの場合、使われるメソッドは、download_price_data_from_file()で、これは単純にインクルードを行う。べつリソースからのダウンロードの場合、download_price_data_from_web()が呼ばれ、ここにおいて定義されたサイトself.download_siteが参照され、実際のデータのロケーターを算出する。
 	で、それぞれのダウンロードメソッドは、それぞれ、対象のリソース名、すなわち前者では、ファイル名、後者ではURLを自動生成し、これに対して実際のインクルード処理をおこなう。
-	で、その処理が正常に終了したら、続いて「その個々のメソッド内で」save_csv_data()メソッドが呼ばれる。このメソッドは、csvデータを表す(つまり、今インクルードされた)文字列を引数に取り、これをしかるべきデータ型に変換。そしてこれをこのオブジェクト内のstock_price_listメンバ変数に格納する。
+	で、その処理が正常に終了したら、続いて「その個々のメソッド内で」convert_csv_data()メソッドが呼ばれる。このメソッドは、csvデータを表す(つまり、今インクルードされた)文字列を引数に取り、これをしかるべきデータ型に変換。そしてこれをこのオブジェクト内のstock_price_listメンバ変数に格納する。
 	最後にdownload_price_data()メソッドに制御を戻し、このデータの最終チェックを行って、正しく処理が完了していればTrueを返す。
 	#階層図 :
 	1, download_price_data = 最上層のデータのフェッチ、変換、格納、ローカルへの吐き出し、タブとの同期、エラー補足、についてのインターフェイス。
 		->2, read_from_tab() : タブに既にデータがあれば読み込み。
 		->3, download_price_data_from_file : ファイルからデータを読み出し、変換、格納。
 				->4, convert_self_to_filename : ファイル名の取得
-						-> 6,save_csv(fromfile=True) : csvの変換と格納。
+						-> 6,convert_csv(fromfile=True) : csvの変換と格納。
 		->3, download_price_data_from_web : インターネットからデータをフェッチする際の中間インターフェイス。ここで種差を吸収する。
 			->4, download_price_data_from_kdb : ダウンロードサイトkbdからデータをフェッチ、変換、格納。
 				->5, get_urls : urlの取得。
 					-> 6,fetch_csv : csvデータのフェッチ
-						-> 7,save_csv() : csvの返還と格納
+						-> 7,convert_csv() : csvの変換と格納
 		->6,synchro_with_tab() : タブと同期
 
 	エラー文の出力は、処理階層における末端の処理部分が担う。それより下は単にFalseを階層的に返し続け、呼び出しもとにそれを返す。
@@ -1094,9 +1114,35 @@ class Stock_Chart(Content):
 		#イベントに関するフラグ変数
 		self.focused_horizontal_ruler = None #Horizontal_Rulerオブジェクトが格納される
 
-		#初期化関数
+		#静的な値の初期化設定メソッド
 		self.set_term(term_num)	#２つのterm変数のセッターメソッド
 		self.set_zoom_scale()	#ズームスケールのデフォルト値の設定
+
+	def initialize_data(self,reload_data=False):
+		"""
+		動的なデータに関する初期化処理。
+		1,対象データのフェッチ、コンバート、格納を行う
+		2,設定された株価データをもとに、移動平均オブジェクトmoving_averagesの設定。
+		3,設定されたmoving_averagesを元に、実質的価値算出オブジェクトAA_analyserの設定。
+		処理に失敗した場合はこの関数はFalseを返し、正常に終了すればTrueを返す。
+
+		また、いつでも再初期化可能である。
+		なお、データそのものを外部リソースから再読み込みする場合は、self.download_price_data()メソッドを単独で用いるか、このメソッドのreload引数を用いること。
+		"""
+		#Tabに関する設定:Tabが設定されていなければオブジェクトを生成し、関連付ける。
+		if not self.get_tab() :
+			tab = Tab()
+			self.set_tab(tab)
+		#データのフェッチと格納
+		#タブにデータが存在すればそこから読み込み、なければフェッチする
+		if reload_data or not self.read_from_tab() :
+			#データのフェッチに失敗すればFalseを返す
+			if not self.download_price_data() :
+				return False
+		#チャート上オシレーターの初期化
+		self.set_default_moving_averages()
+		self.set_AA_analyser()
+		return True
 
 	def get_moving_averages(self):
 		"""
@@ -1173,49 +1219,60 @@ class Stock_Chart(Content):
 		"""
 		return self._drawing_start_index , self._drawing_end_index
 
+	def set_price_data(self,data):
+		"""
+		self.stock_price_listのセッターメソッド。
+		drawing_indexの設定もここで行う。
+		"""
+		if isinstance(data,(list,tuple)) and data :
+			self.stock_price_list = tuple(data)
+			self.set_drawing_index( end =len(data) -1 )
+
 	def download_price_data(self):
 		"""
 		CSVデータのダウンロードを行うインターフェイスです。
-		このオブジェクトのfetch,save,downloadメソッドは、その株価データ（のコンテナself.stock_price_list)を直接編集します。
-	これはそのデータ構造が単純で、また、その利用形式、登録するデータの形式が単一であり、データへのアクセスや設定のためのむつかしいインターフェイスが全く必要ないためです。
+		このメソッドは、設定されたダウンロードモード、データリソースのダウンロード元、に基づいて、実際のデータのフェッチと格納を行う子downloadメソッドを呼び出します。
+		その子downloadメソッド郡は、内部でデータの取り込み作業を行う諸関数群を呼び出し、取り込まれた株価データを表現するテキストデータはそれをこのプログラムに適合するデータ型に変換するconvertメソッドを通り、最終的なデータの調整、確認の後、set_price_dataメソッドによって実際に生きた形で格納されます
+
+		つまるところ、このメソッドは、ダウンロードモード及びリソース先の分岐の選択から、実際のデータのフェッチ、変換、確認、格納、あるいはTABへの動機、ひいては日足の週足への変換まで、データの直接的な設定に関するおおよその処理のほとんどすべての面倒を見ます
 		"""
-		#Tabにデータがあったらそこから読み出す。
-		if self.read_from_tab() :
-			return True	#もはやダウンロードの必要はない。制御を返す。
-		#Tabになかったらフェッチし、保存する。
-		self.stock_price_list = []	#初期化
 		#定義されたダウンロードモードに基づく処理の分岐
 		if self.download_mode == DOWNLOAD_MODE_LOCAL :
 			#ローカルモード
 			if not self.download_price_data_from_file() :
 				return False
-		elif self.download_mode == DOWNLOAD_MODE_DIFF :
-			#差分ダウンロード:未定義。
+		elif self.download_mode == DOWNLOAD_MODE_AUTO :
+			#オートモード:ローカルにファイルがあればそのデータを使い、さもなくばフェッチする。
 			if self.exist_stock_price_file() :
-				#ファイルがあり、かつタイムスタンプが最新であればファイルからロード
 				if not self.download_price_data_from_file() :
 					return False
 			else :
-				#さもなくばインターネットからフェッチ
+				if not self.download_price_data_from_web() :
+					return False
+		elif self.download_mode == DOWNLOAD_MODE_DIFF :
+			#差分ダウンロード:ファイルが存在し、且つ最新の状態ならそれを用い、さもなくばwebからダウンロード。
+			if self.exist_stock_price_file(check_latest=True) :
+				if not self.download_price_data_from_file() :
+					return False
+			else :
 				if not self.download_price_data_from_web() :
 					return False
 		elif self.download_mode == DOWNLOAD_MODE_DOWNLOAD :
-			#強制ダウンロード
+			#強制ダウンロードモード。
 			if not self.download_price_data_from_web() :
 				return False
 		else :
 			raise Exception("未定義のモードです")
-		#最後のエラー補足。株価データが正常かを確認
-		if not self.stock_price_list :
-			return False
-		self.set_drawing_index( end=len(self.stock_price_list)-1 )
+
 		self.synchro_with_tab()	#tabに同期
 		#週足、月足についてはtabを介して変換されたデータを得る。
 		if TERM_DICT[self.term_for_a_bar] in ("週足","月足") :
-			self.read_from_tab()
-		#チャート上オシレーターの初期化
-		self.set_default_moving_averages()
-		self.set_AA_analyser()
+			if not self.read_from_tab() :
+				tkMessageBox.showerror(message="tabに週足または月足のデータが保存されていません。予期せぬ動きです")
+				return False
+		#最後のエラー補足。株価データが正常かを確認
+		if not self.stock_price_list :
+			return False
 
 		return True
 	
@@ -1232,15 +1289,26 @@ class Stock_Chart(Content):
 		fileobj = open(filename,"r")
 		csv_text = fileobj.read()
 		fileobj.close()
-		if not self.save_csv_data(csv_text,from_file=True):
-			return False	#csvの変換と格納の失敗
+		price_list = []
+		if not self.convert_csv_data(csv_text,price_list,from_file=True):
+			return False	#csvの変換の失敗
+		self.set_price_data(price_list)	#価格データの保存
 		return True
 
-	def exist_stock_price_file(self):
+	def exist_stock_price_file(self,check_latest=False):
 		"""
 		このオブジェクトに適合する株価データがローカル環境に保存されているかどうかを返す
+		また、オプション引数latestに真値が与えられた時、それが最新のデータかどうかも確認する。
 		"""
-		return os.path.isfile(self.convert_self_to_filename())
+		existing = os.path.isfile(self.convert_self_to_filename())
+		if existing and check_latest :
+			#タイムスタンプを見て今日更新されたものであればTrue、さもなくばFalseを返す
+			epoctime = os.stat(self.convert_self_to_filename()).st_mtime
+			date = Date.fromtimestamp(epoctime)
+			today = Date.today()
+			return today == data
+		else :
+			return existing
 	
 	def convert_self_to_filename(self):
 		"""
@@ -1271,8 +1339,8 @@ class Stock_Chart(Content):
 			url_term_phrase = TERM2URL_DICT[TERM_DICT[self.term_for_csv]]
 			if url_term_phrase :
 				url_term_phrase = "/" + url_term_phrase
-			for year in range(2016,2012,-1) :
-				url = "http://www.k-db.com/stocks/%s-T%s?year=%d&download=csv" % (self.security_code,url_term_phrase,year)
+			for year in range(2016,2013,-1) :
+				url = "http://www.k-db.com/stocks/%s-T/%s/%d?download=csv" % (self.security_code,url_term_phrase,year)
 				url_list.append(url)
 		else :
 			url_list = self.get_urls(self.term_for_csv)
@@ -1280,10 +1348,13 @@ class Stock_Chart(Content):
 				tkMessageBox.showerror(message="kdb.comについて、分足のデータに関するurlの自動補足ができませんでした。")
 				return False
 		#CSVのフェッチとコンバート、保存を行い、何らかのエラーが出た時にはFalseを返す。
+		price_list = []
 		for url in url_list:
-			if not self.fetch_csv(url):
-				return False
-		self.stock_price_list.reverse()	#逆順、つまり日時において昇順にします
+			csv_text = self.fetch_csv(url)
+			if not ( csv_text and self.convert_csv_data(csv_text,price_list) ) :
+				return False	#CSVテキストが異常か、その変換に失敗した
+		price_list.reverse()	#逆順、つまり日時において昇順にします
+		self.set_price_data(price_list)	#データの登録
 		return True
 
 	def get_urls(self,term_num):
@@ -1340,20 +1411,18 @@ class Stock_Chart(Content):
 		Tabにデータが保管されていたのならば、Trueを、さもなくばFalseを、返す。
 		"""
 		tab = self.get_tab()
-		if tab :
-			if TERM_DICT[self.term_for_a_bar] in ("週足","月足") and tab.data_in_tab(self.term_for_a_bar):
-				self.stock_price_list = tab.get_data(self.term_for_a_bar)
-				self.set_drawing_index(end=len(self.stock_price_list)-1)
-				return True
-		return False
+		if tab and tab.data_in_tab(self.term_for_a_bar):
+			data = tab.get_data(self.term_for_a_bar)
+			self.set_price_data(data)
+			return True
+		else :
+			return False
 
 	def fetch_csv(self,url):
 		"""
 		定義されたulrから株価データをCSV形式でフェッチする。
-		正常にダウンロードの完了したCSV文章は、データ構造をリスト形式に変換され、self.stock_price_listに保存される。
-		この処理は、実際にはself.save_csv_data()メソッドによって行われ、同時にデータチェックも行われる。
-
-		データ取得の失敗 : このメソッドは、CSVデータのダウンロードに失敗した時、あるいは、ダウンロードされたCSVデータが予期された形式でない時、Flase値をReturnする。あるいは、正常に処理が完了した場合にはTrue値を返す。
+		正常にフェッチされた場合にはそのテキストデータを返り値として返す。
+	さもなくばー即ち、そのCSVデータのダウンロードに失敗したか、あるいはそのフェッチされた文章データが予期されるべき形式をとっていなかった場合、その時には、False値を返す。
 		"""
 		#URLの動的生成と、Requestオブジェクトの生成。
 		request = urllib2.Request(url)
@@ -1373,14 +1442,15 @@ class Stock_Chart(Content):
 			debug_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),"debug.txt")
 			open(debug_file,"w").write(csv_text)
 			print "フェッチしたファイル debug.txt をプロジェクトディレクトリに生成しました。"
-		#self.save_csv_data()メソッドを呼び出し、データチェックに引っかかったらFalseをリターンする
-		if not self.save_csv_data(csv_text) :
-			return False	#csvデータの解釈と変換、格納の失敗。
-		return True	#フェッチとデータ格納完了
+		#csv_textのチェック。問題があればエラー文を表示し、Falseを返す。
+		if not csv_text : 
+			tkMessageBox.showerror(message="csv_textが空な文字列です。データのフェッチに失敗したようです。")
+			return False
+		return csv_text
 
-	def save_csv_data(self,csv_text,from_file=False):
+	def convert_csv_data(self,csv_text,price_list,from_file=False):
 		"""
-		引数に与えられたCSV文章を数値型にコンバートして、self.stock_price_listメンバ変数に株価リストとして保存する。
+		引数に与えられたCSV文章を数値型にコンバートして、与えられたリストオブジェクトへの参照、price_listに格納する。
 		また、同時にデータフォーマットのチェックを行い、予期せぬデータであった場合はFalse値を返す。
 
 		CSV１行目と２行目の書式:
@@ -1389,6 +1459,8 @@ class Stock_Chart(Content):
 		日足以外
 		2:日付,時刻,始値,高値,安値,終値,出来高,売買代金
 		"""
+		if not isinstance(price_list,list) :
+			raise Exception("不正な引数です")
 		i = 1 	#行数を表す一時変数。
 		is_daily_data = ( TERM_DICT[self.term_for_csv] == "日足" )	#日足データであるか否か
 		for line in csv_text.split("\n") :
@@ -1415,7 +1487,7 @@ class Stock_Chart(Content):
 				"""
 				i = i + 1
 				continue
-			#3行目以降:第２フィールド以下をintに変換してself.stock_price_listにappend
+			#3行目以降:第２フィールド以下をintに変換してprice_listにappend
 			else :
 				if line.strip() == "" :
 					continue
@@ -1433,7 +1505,7 @@ class Stock_Chart(Content):
 					else :
 						csv_converted_list.append(int(float(tmp_list[field_num])))
 #						csv_converted_list.append(int(tmp_list[field_num]))
-				self.stock_price_list.append(csv_converted_list)
+				price_list.append( tuple(csv_converted_list) )
 		return True 
 
 	def save_csv_to_local(self):
@@ -1463,6 +1535,7 @@ class Stock_Chart(Content):
 		weekly_price_list = []
 		tmp_list = []
 		daily_list = self.stock_price_list
+		turnover_index , amount_index = self.pricetype2index("T") , self.pricetype2index("A")
 		for index in range(0,len(daily_list)) :
 			date = self.get_date2int_list(index)	#[year,month,day]のリスト
 			if Date(date[0],date[1],date[2]).weekday() == 0 :	#月曜なら
@@ -1470,7 +1543,9 @@ class Stock_Chart(Content):
 				high , low , price_range = self.get_price_range(tmp_list)
 				opning , closing = self.get_opning_closing_price(tmp_list)
 				date_str = "%s〜%s" % (tmp_list[0][0],tmp_list[-1][0][tmp_list[-1][0].find("-")+1:])
-				l = (date_str,opning,high,low,closing)
+				turnover = sum( [ ls[turnover_index] for ls in tmp_list] )
+				amount_ofmoney = sum( [ ls[amount_index] for ls in tmp_list] )
+				l = (date_str,opning,high,low,closing,turnover,amount_ofmoney)
 				weekly_price_list.append(l)
 
 		return weekly_price_list
@@ -1559,10 +1634,15 @@ class Stock_Chart(Content):
 		padding_size = int(zoom_scale * 4)
 		return candle_width,padding_size
 	
-	def get_surface(self,surface_size,color_key=(255,255,255)):
+	def get_surface(self,surface_size,color_key=BACKGROUND_COLOR):
+		"""
+		サーフェスを得るためのユーティリティ関数。
+		チャートの描画に関しては、諸所の要素を諸所の描画メソッドにおいて描画し、そのサーフェスを持ち寄る形を取るから、透明設定が必要である
+		通常、背景色の設定は背景色として静的に定義して問題はないが、背景色を前景として描画しうる余地を残してオプション引数を設定している。
+		"""
 		surface = pygame.Surface(surface_size)
 		surface.set_colorkey(color_key)
-		surface.fill((255,255,255))
+		surface.fill(color_key)
 		return surface
 
 	def set_index_posX_table(self):
@@ -1622,9 +1702,9 @@ class Stock_Chart(Content):
 			ma_days = DEFAULT_MA_DAYS_MINUTELY
 		elif TERM_DICT[self.term_for_a_bar] in ("週足") :
 			ma_days = DEFAULT_MA_DAYS_WEEEKLY
-		for day,color in ma_days :
-			MA = Moving_Average( self,day,"C",(color or (0,0,0)) )
-			if not color :
+		for day,color,visible in ma_days :
+			MA = Moving_Average(self,day,"C",color)
+			if not visible :
 				MA.set_imvisible()
 			self.moving_averages.append(MA)
 
@@ -1849,17 +1929,25 @@ class Stock_Chart(Content):
 		height = font.size("あ")[1] + v_padding
 		surface = self.get_surface((surface_size[0],height))
 		right = surface_size[0] - side_padding
+		#一時関数 : 適当な間隔で描画するにはこの関数に適当な引数を与えるだけで良い。
+		def f(string,color,right):
+			rendered = font.render(unicode(string,"utf-8"),True,color)
+			right = right - ( rendered.get_width() + side_padding/2 )
+			surface.blit(rendered,(right,v_padding))
+			return right
+		#描画
 		if self._Y_axis_fixed == True :
-			renderd = font.render(u"Y軸固定",True,(100,100,100))
-			right = right - renderd.get_width() - side_padding/2 
-			surface.blit(renderd,(right,v_padding))
+			string , color = "Y軸固定" , (100,100,100)
+			right = f(string,color,right)
 		for MA in self.moving_averages :
-			color = MA.color if MA.is_visible() else (0,0,0)
-			days = "%d日移動平均" % (MA.days)
-			days = unicode(days,"utf-8")
-			renderd = font.render(days,True,color)
-			right = right - renderd.get_width() - side_padding/2
-			surface.blit(renderd,(right,v_padding))
+			days = "MA-%d" % (MA.days)
+			color = MA.color if MA.is_visible() else FOREGROUND_COLOR
+			right = f(days,color,right)
+		#Actual-Account
+		AA = self.AA_analyser
+		string = "AA-line" 
+		color = AA.color if AA.is_visible() else FOREGROUND_COLOR
+		right = f(string,color,right)
 			 
 		return surface
 
@@ -1916,8 +2004,8 @@ class Stock_Chart(Content):
 			low_price += 1	#もはや安値は意味しない
 		for i in range(low_price,high_price+axis_interval,axis_interval) :
 			pos_y = self.price_to_height(i)
-			pygame.draw.line(surface,(0,0,0),(0,pos_y),(surface_width,pos_y),1)	#横線
-			text_surface = font.render(str(i),False,(0,0,0))
+			pygame.draw.line(surface,FOREGROUND_COLOR,(0,pos_y),(surface_width,pos_y),1)	#横線
+			text_surface = font.render(str(i),True,FOREGROUND_COLOR)
 			text_size = font.size(str(i))
 			flipped_surface = pygame.transform.flip(text_surface,False,True)	#最後の座標の反転のため
 			surface.blit(flipped_surface,(surface_width-text_size[0],pos_y-text_size[1]))	#文字
@@ -1931,8 +2019,10 @@ class Stock_Chart(Content):
 		実際の描画を行うメソッドには引数をそのまま継承して渡して、コールする。
 		すべてのこのメソッドに隷属的な描画命令セットは最後にその描画されたサーフェスを返す。
 		"""
-		if self.term_for_a_bar == TERM_DICT["日足"] or self.term_for_a_bar == TERM_DICT["前場後場"] :
+		if self.term_for_a_bar == TERM_DICT["日足"] :
 			drawn_surface = self.draw_y_daily_axis(surface_size,font)
+		elif self.term_for_a_bar == TERM_DICT["前場後場"] :
+			drawn_surface = self.draw_y_sessionly_axis(surface_size,font)
 		elif self.term_for_a_bar == TERM_DICT["週足"]:
 			drawn_surface = self.draw_y_weekly_axis(surface_size,font)
 		elif self.term_for_a_bar == TERM_DICT["5分足"]:
@@ -1947,9 +2037,10 @@ class Stock_Chart(Content):
 	def draw_y_daily_axis(self,surface_size,font):
 		"""
 		日足用の縦線描画
-		また、前場後場足についてもその縦線を描画する。
 		月単位で縦線を描く
 		"""
+		if self.get_zoom_scale() >= 1.5 :
+			return self.draw_y_sessionly_axis(surface_size,font)
 		surface = self.get_surface(surface_size)
 		start_index , end_index = self.get_drawing_index()
 		for index in range(start_index,end_index+1) :
@@ -1966,6 +2057,22 @@ class Stock_Chart(Content):
 			else :	test2 = False
 			#もし月の最も初めのデータであるならば描画
 			if test1 or test2 :
+				date_str = "%s/%s/%s" % (date[0],date[1],date[2])
+				self.draw_actual_y_axis(surface,font,index,date_str)
+		return surface
+
+	def draw_y_sessionly_axis(self,surface_size,font):
+		"""
+		前後場足用の縦線描画メソッド
+		週単位で描く。
+		"""
+		if self.get_zoom_scale() <= 0.5 :
+			return self.draw_y_daily_axis(surface_size,font)
+		surface = self.get_surface(surface_size) 
+		start_index , end_index = self.get_drawing_index()
+		for index in range(start_index,end_index+1,2) :
+			date = self.get_date2int_list(index)
+			if Date(date[0],date[1],date[2]).weekday() == 0 :
 				date_str = "%s/%s/%s" % (date[0],date[1],date[2])
 				self.draw_actual_y_axis(surface,font,index,date_str)
 		return surface
@@ -2012,9 +2119,9 @@ class Stock_Chart(Content):
 		surface_height = surface.get_height()
 		pos_x = self.get_index2pos_x(index)
 		font_width,font_height = font.size(date_str)
-		text_surface = font.render(date_str,False,(0,0,0))
+		text_surface = font.render(date_str,False,FOREGROUND_COLOR)
 		line_end_Y = surface_height - font_height - 2
-		line_color = color if color else (0,0,0)	#デフォルトは黒
+		line_color = color or FOREGROUND_COLOR	#デフォルトは黒
 
 		pygame.draw.line(surface,line_color,(pos_x,0),(pos_x,line_end_Y),1)
 		surface.blit(text_surface,(pos_x-font_width/2,surface_height-font_height-1))
@@ -2055,6 +2162,9 @@ class Stock_Chart(Content):
 			return 4
 		elif price_type == "T" :
 			return 5
+		elif price_type == "A" :
+			#Amount of Money
+			return 6
 		else :
 			raise Exception("引数が価格の種類を表していません")
 
@@ -2256,8 +2366,6 @@ class Setting_Tk_Dialog(object):
 		if not isinstance(parent,(BASE_BOX,Root_Container,Stock_Chart)) :
 			raise TypeError("引数がBOXオブジェクトあるいはRoot_Containerオブジェクトでありません")
 		self.parent = parent	#呼び出し元オブジェクト
-		event_attrs = {"from":self}
-		self.dummy_event = pygame.event.Event(pygame.USEREVENT,event_attrs)	#ダミーのイベントオブジェクト
 		#Tkの呼び出し
 		self.root = Tk.Tk()	#Tkのルートウィンドウ
 		self.root.title("設定画面")
@@ -2292,7 +2400,7 @@ class Setting_Tk_Dialog(object):
 		self.download_site_Tkvar = Tk.IntVar()
 		#デフォルト値の設定
 		self.term_for_a_bar_Tkvar.set(TERM_DICT["日足"])
-		self.download_mode_Tkvar.set(DOWNLOAD_MODE_LOCAL)
+		self.download_mode_Tkvar.set(DOWNLOAD_MODE_AUTO)
 		self.download_site_Tkvar.set(DOWNLOAD_SITE_KDB)
 		#TkWidgets
 		#Entry:証券コード入力欄
@@ -2304,6 +2412,7 @@ class Setting_Tk_Dialog(object):
 		download_mode_radiobutton_labelframe = Tk.LabelFrame(self.root,text="ダウンロードモードの設定")
 		download_mode_radiobutton_labelframe.pack()
 		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="ローカルモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="オートモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_AUTO).pack(side="left")
 		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="差分モード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DIFF).pack(side="left")
 		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="通常ダウンロード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DOWNLOAD).pack(side="left")
 		#Radiobutton:データダウンロードについてのサイト選択
@@ -2335,18 +2444,17 @@ class Setting_Tk_Dialog(object):
 		download_site = self.download_site_Tkvar.get()
 		#証券コードのチェック
 		if security_code.isdigit() and int(math.log10(int(security_code))+1) == 4 :
-			#stock_chartオブジェクト、tabオブジェクトの生成と初期設定
-			tab = Tab()
+			#stock_chartオブジェクトの生成と初期設定
 			stock_chart_object = Stock_Chart(security_code,term_num,download_mode,site=download_site) #CSVをフェッチし、データを保持するオブジェクト
-			stock_chart_object.set_tab(tab)
 			#株価CSVデータのフェッチと保存が成功したらTkrootウィンドウを破棄し、
-			if stock_chart_object.download_price_data() :
+			if stock_chart_object.initialize_data() :
 				box = Container_Box(self.parent,stock_chart_object)	#stock_chartオブジェクトを格納したBOXオブジェクト
 				self.parent.add_box(box)	#呼び出し元のBOXに追加
 				#buttonを押す
 				buttons_for_term = self.parent.get_button_box("buttons_for_term")	#term用のbutton_boxをサーチ
 				term_button = buttons_for_term.get_button(term_num)	#選択termのボタンをサーチ
-				term_button.dispatch_MOUSEBUTTONDOWN(self.dummy_event)
+				term_button.set_state(True)
+				buttons_for_term.draw()
 
 				self.root.destroy()	#Tkルートウィンドウを破棄
 			else :
@@ -2356,7 +2464,7 @@ class Setting_Tk_Dialog(object):
 
 
 #General Functions-----
-
+#Initializations : Create and Set Default UI Objects
 def add_default_buttons(root):
 	"""
 	"""
@@ -2398,12 +2506,13 @@ def add_default_labels(root):
 	"""
 	"""
 	label_box = Label_box(root)
-	label1 = Label(color=(255,0,0))
-	label2 = Label("Hello StockChart",color=(0,0,255))
+	label1 = Label(str_color=(255,0,0))
+	label2 = Label("Hello StockChart",str_color=(0,0,255))
 	label_box.add_label(label1)
 	label_box.add_label(label2)
 	root.add_box(label_box)
 
+#Binded Functions associated with UI_BUTTON objects
 def pressed_term_button(button):
 	"""
 	Root_Container名義で新たなStock_Chartオブジェクトを、新たなContainer_Boxに配置して、それをrootの子BOXとして追加する。
@@ -2416,7 +2525,8 @@ def pressed_term_button(button):
 		#Container_Box,Stock_Chartオブジェクトの生成と設定
 		new_container_box = Container_Box(root)
 		new_stock_chart = focused_content.inherit(term_num) #フォーカスされているコンテンツから継承
-		new_stock_chart.download_price_data()
+		if not new_stock_chart.initialize_data() :
+			tkMessageBox.showerror(message="データの初期化に失敗しました")
 		#ボックスへの登録
 		new_container_box.set_content(new_stock_chart)
 		root.add_box(new_container_box)
@@ -2478,6 +2588,7 @@ def pressed_AA_button(button):
 	focused_box.draw()
 	return True
 
+#Synchronizing Functions : those will be call'd when focused-object is changed
 def synchronize_Y_axis_fix(button):
 	"""
 	フォーカスが移動したときに呼ばれるボタン状態シンクロ関数。Y軸固定オプションボタンについて定義。
@@ -2516,7 +2627,7 @@ def synchronize_AA(button):
 	else :
 		print "フォーカスの写ったオブジェクトがチャートオブジェクトでありません。"
 	
-
+#Ulils
 def get_human_readable(num):
 	"""
 	int値をとり、それをヒューマンリーダブルなunicode文字列に変換したものを返す。
