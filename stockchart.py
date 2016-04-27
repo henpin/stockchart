@@ -430,7 +430,7 @@ class Label(object):
 	3,描画
 	"""
 	def __init__(self,string=None,str_color=None,font=None) :
-		self.font = font or pygame.font.Font(FONT_NAME,15)	#文字の描画に用いられるフォント
+		self.font = font or pygame.font.Font(FONT_NAME,14)	#文字の描画に用いられるフォント
 		self.initial_string = "セッティングにはKEYを押してください。"	#文字列非設定時のデフォルト値
 		self.str_color = str_color or (0,0,0)
 		self.string = string or self.initial_string	#実際に描画される文字列
@@ -473,7 +473,7 @@ class Container_Box(BASE_BOX):
 		if content :
 			self.set_content(content)
 		self.child_box_list = None	#拡張性のため子BOXを考えている。ただし、コンテンツとの共存は考えていない。
-		self.font = font or pygame.font.Font(FONT_NAME,14)
+		self.font = font or pygame.font.Font(FONT_NAME,13)
 		self.bold_font = pygame.font.Font(BOLD_FONT_NAME,13)
 		self.height_prefix = False	#動的な大きさか静的な大きさか。デフォルトは前者。
 		self.width_prefix = False
@@ -543,7 +543,7 @@ class Button_Box(BASE_BOX):
 		self.bgcolor = bgcolor or BACKGROUND_COLOR
 		self.set_parent(parent)
 		self.button_list = []
-		self.font = font or pygame.font.Font(FONT_NAME,15)
+		self.font = font or pygame.font.Font(FONT_NAME,14)
 		self.id_str = id_str
 		self.height_prefix = True
 		self.width_prefix = False
@@ -805,24 +805,30 @@ class Tab(object):
 class Horizontal_Ruler(object):
 	"""
 	Stock_Chartオブジェクトにおいて用いられる水平バーを表現するオブジェクト。
+	このオブジェクトは内部に「価格データ」を格納し、描画関数が呼び出されるたびに座標値へ変換する。
+	これは価格の座標値への変換式が動的に生成されるため避けがたい事情がある。
+
+	また、このオブジェクトは「バーのタイプ」を一種のid情報として格納する。
+	親チャートオブジェクトはこのタイプの値に基づいて、多数格納されたこのオブジェクト郡から目的のバーを検索することになる。
 	"""
-	def __init__(self,chart,price,color):
+	def __init__(self,parent,ruler_type,price,color):
 		"""
 		"""
-		if not isinstance(chart,Stock_Chart) :
-			raise Exception("不正な型です")
-		self.chart = chart	#親となるチャート
+		if not isinstance(parent,Stock_Chart) or ( not ruler_type in ("H","L","M") ) :
+			raise Exception("不正な型の引数です: parent=%s,ruler_type=%s" % (parent,ruler_type))
+		self.type = ruler_type
+		self.parent = parent	#親となるチャート
 		self.price = price
 		self.color = color
 		self._drawing_rect = None	#描画範囲を表現するRectで、描画時設定される。インターフェイスを用いてアクセスする。
 
-	def draw_to_surface(self,surface,font) :
+	def draw_to_surface(self,surface,font):
 		"""
 		水平ルーラーを描画するメソッド。
 		引数として与えられたサーフェスに直接描画する
 		このメソッドの呼び出し元は、このメソッド終了後、サーフェスをY軸方向にフリップするのでテキストは予めフリップしておく必要がある
 		"""
-		drawing_height = self.chart.price_to_height(self.price)
+		drawing_height = self.parent.price_to_height(self.price)
 		price_renderd = font.render(unicode(str(self.price),"utf-8"),True,FOREGROUND_COLOR)
 		flipped = pygame.transform.flip(price_renderd,False,True)
 		drawing_price_renderd_H = drawing_height - (price_renderd.get_height()/2)
@@ -855,9 +861,12 @@ class Horizontal_Ruler(object):
 	def set_price(self,price):
 		self.price = price
 
+	def get_price(self):
+		return self.price
+
 	def collide(self,pos):
 		"""
-		与えられたposと衝突しているか否かを返す
+		与えられたposとこのオブジェクトの価格表示領域が衝突しているか否かを返す
 		"""
 		rect = self.get_drawing_rect()
 		if rect.collidepoint(pos) :
@@ -1092,6 +1101,7 @@ class Stock_Chart(Content):
 		#定められたインターフェイスによってのみ扱われるべき変数
 		#チャート描画に関するメンバ変数
 		self._zoom_scale = 1 	#イベント用
+		self.zoom_scale_step = 0.5
 		self.right_side_padding = 20	#右端のパッディング
 		self.left_side_padiing = 14	#左端のパッディング
 		self.vertical_padding = 20
@@ -1306,7 +1316,7 @@ class Stock_Chart(Content):
 			epoctime = os.stat(self.convert_self_to_filename()).st_mtime
 			date = Date.fromtimestamp(epoctime)
 			today = Date.today()
-			return today == data
+			return today == date
 		else :
 			return existing
 	
@@ -1629,9 +1639,11 @@ class Stock_Chart(Content):
 		surface.blit(surface_drawn_actual_account,(0,0))
 
 	def get_drawing_size(self):
+		"""
+		"""
 		zoom_scale = self.get_zoom_scale()
-		candle_width = int(zoom_scale * 4)
-		padding_size = int(zoom_scale * 4)
+		candle_width = int(round(zoom_scale * 4))
+		padding_size = int(round(zoom_scale * 4))
 		return candle_width,padding_size
 	
 	def get_surface(self,surface_size,color_key=BACKGROUND_COLOR):
@@ -1686,7 +1698,7 @@ class Stock_Chart(Content):
 			pygame.draw.rect(surface,candle_color,rect,candle_width)
 			line_start_pos = (pos_x , self.price_to_height(high_price) )
 			line_end_pos = (pos_x , self.price_to_height(low_price) )
-			line_width = int(zoom_scale*2)
+			line_width = int(zoom_scale * 2)
 			pygame.draw.line(surface,candle_color,line_start_pos,line_end_pos,line_width)
 		surface = pygame.transform.flip(surface,False,True)
 		return surface
@@ -1967,6 +1979,24 @@ class Stock_Chart(Content):
 		flipped_surface = pygame.transform.flip(surface,False,True)
 		return flipped_surface
 
+	def get_horizontal_ruler(self,ruler_type):
+		"""
+		水平ルーラーのタイプを表現する文字列"H"/"L"/"M"を引数に、そのルーラータイプで定義されたHorizontal_Rulerオブジェクトを返します。
+		"""
+		if not ruler_type in ("H","L","M") :
+			raise Exception("不正な引数です")
+		for ruler in self.horizontal_rulers :
+			if ruler.type == ruler_type :
+				return ruler
+		raise Exception("指示された要素が見つかりませんでした")
+
+	def set_horizontal_rulers_price(self,ruler_type,price):
+		"""
+		引数で指示された水平ルーラータイプで定義されたルーラーオブジェクトの価格を設定するインターフェイス
+		"""
+		ruler = self.get_horizontal_ruler(ruler_type)
+		ruler.set_price(price)
+
 	def set_default_horizontal_rulers(self):
 		"""
 		デフォルトの設定で水平ルーラを定義します。
@@ -1977,12 +2007,35 @@ class Stock_Chart(Content):
 		start , end = self.get_drawing_index()
 		high_price , low_price , price_range = self.get_price_range(self.stock_price_list[start:end])
 		last_day_closing_price = self.stock_price_list[-1][self.pricetype2index("C")]
-		high_ruler = Horizontal_Ruler(self,high_price,(255,100,100))
-		low_ruler = Horizontal_Ruler(self,low_price,(100,100,255))
-		close_ruler = Horizontal_Ruler(self,last_day_closing_price,(100,255,100))
+		high_ruler = Horizontal_Ruler(self,"H",high_price,(255,100,100))
+		low_ruler = Horizontal_Ruler(self,"L",low_price,(100,100,255))
+		close_ruler = Horizontal_Ruler(self,"M",last_day_closing_price,(100,255,100))
 		self.horizontal_rulers.append(high_ruler)
 		self.horizontal_rulers.append(low_ruler)
 		self.horizontal_rulers.append(close_ruler)
+
+	def set_horizontal_rulers_prices_default(self):
+		"""
+		水平ルーラーの価格状態をデフォルトー即ち「描画領域中の最高値」、「描画領域中の最安値」、「最近の終値」に再設定します。
+		"""
+		start , end = self.get_drawing_index()
+		high_price , low_price , price_range = self.get_price_range(self.stock_price_list[start:end])
+		last_day_closing_price = self.stock_price_list[-1][self.pricetype2index("C")]
+		#Do setting
+		self.set_horizontal_rulers_price("H",high_price)
+		self.set_horizontal_rulers_price("L",low_price)
+		self.set_horizontal_rulers_price("M",last_day_closing_price)
+
+	def set_middle_horizontal_rulers_price_center(self):
+		"""
+		中間の水平ルーラーとして定義されているルーラーオブジェクトの価格を、
+		定義されている高値のルーラーと安値のルーラーのちょうど中間値に来るように再定義します。
+		"""
+		high_ruler_price = self.get_horizontal_ruler("H").get_price()
+		low_ruler_price = self.get_horizontal_ruler("L").get_price()
+		average = float( high_ruler_price + low_ruler_price ) / 2
+		#Do setting
+		self.set_horizontal_rulers_price("M",float(average))
 	
 	def draw_coordinate_axis(self,surface_size,high_price,low_price,font):
 		"""
@@ -2237,6 +2290,26 @@ class Stock_Chart(Content):
 		general_labels[1].set_string("高: %d  安: %d  始: %d  終: %d  出来高: %s  売買高: %s" % (high,low,opning,closing,turnover,kinngaku))
 		general_label_box.draw()
 
+	def zoom_up(self,step=1):
+		"""
+		チャートにおける個々の足の大きさを定義するズームスケールを拡大させる
+		どれだけ拡大させるかはself.zoom_scale_stepと、この引数に与えられたstep量によって決まる。
+		"""
+		new_scale = self.get_zoom_scale() + ( step * self.zoom_scale_step )
+		if new_scale > 3 :
+			return False
+		self.set_zoom_scale(new_scale)
+
+	def zoom_down(self,step=1):
+		"""
+		チャートにおける個々の足の大きさを定義するズームスケールを縮小させる
+		どれだけ縮小させるかはself.zoom_scale_stepと、この引数に与えられたstep量によって決まる。
+		"""
+		new_scale = self.get_zoom_scale() - ( step * self.zoom_scale_step )
+		if new_scale <= 0 :
+			return False
+		self.set_zoom_scale(new_scale)
+
 	def dispatch_MOUSEBUTTONDOWN(self,event):
 		"""
 		"""
@@ -2298,9 +2371,9 @@ class Stock_Chart(Content):
 			self.set_highlight_index(highlight_index+1)
 			self.print_highlight_price_information()
 		elif event.key == pygame.K_UP :
-			self.set_zoom_scale(self.get_zoom_scale()+0.5)
-		elif event.key == pygame.K_DOWN and self._zoom_scale >= 1:
-			self.set_zoom_scale(self.get_zoom_scale()-0.5)
+			self.zoom_up()
+		elif event.key == pygame.K_DOWN :
+			self.zoom_down()
 		else :
 			pass
 
@@ -2482,6 +2555,7 @@ def add_default_buttons(root):
 	button_informations = []	#(id_str,bind_function,swiching,synchro_func)の情報を格納する一時変数
 	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True,synchronize_Y_axis_fix) )
 	button_informations.append( ("RulerDefault",pressed_set_ruler_default,False,None) )
+	button_informations.append( ("RulerMiddle",pressed_set_middle_ruler_center,False,None) )
 	button_informations.append( ("AA-line",pressed_AA_button,True,synchronize_AA) )
 	#登録
 	for id_str , bind_function , swiching , synchro_func in button_informations :
@@ -2556,7 +2630,18 @@ def pressed_set_ruler_default(button):
 	"""
 	root = button.get_parent_box().get_father()
 	focused_box = root.get_focused_box()
-	focused_box.get_content().set_default_horizontal_rulers()
+	focused_box.get_content().set_horizontal_rulers_prices_default()
+	focused_box.draw()
+	return True
+
+def pressed_set_middle_ruler_center(button):
+	"""
+	フォーカスチャートの水平ルーラーのうち、中間のルーラーとして定義されたオブジェクトの価格状態を、
+	高値として定義されたそれと安値のそれとして定義されたそれの中間値に再設定する。
+	"""
+	root = button.get_parent_box().get_father()
+	focused_box = root.get_focused_box()
+	focused_box.get_content().set_middle_horizontal_rulers_price_center()
 	focused_box.draw()
 	return True
 
