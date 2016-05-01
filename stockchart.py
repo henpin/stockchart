@@ -1131,6 +1131,8 @@ class Stock_Chart(Content):
 	def initialize_data(self,reload_data=False):
 		"""
 		動的なデータに関する初期化処理。
+		__init__メソッドでは呼び出しが行われない。
+		これはこのメソッドが動的なデータの生成に成功したか否かをこのメソッドの呼び出し元に単純に返すためである。
 		1,対象データのフェッチ、コンバート、格納を行う
 		2,設定された株価データをもとに、移動平均オブジェクトmoving_averagesの設定。
 		3,設定されたmoving_averagesを元に、実質的価値算出オブジェクトAA_analyserの設定。
@@ -2377,6 +2379,7 @@ class Stock_Chart(Content):
 		else :
 			pass
 
+
 class Get_Url_Parser(HTMLParser):
 	"""
 	日足以外のCSVデータのURLを得るためのHTMLパーサークラス
@@ -2442,6 +2445,14 @@ class Setting_Tk_Dialog(object):
 		#Tkの呼び出し
 		self.root = Tk.Tk()	#Tkのルートウィンドウ
 		self.root.title("設定画面")
+		#グローバルなイベントのバインディング
+		self.root.bind("<Escape>",self.close_window)
+
+	def close_window(self,Nouse=None):
+		"""
+		Tkの再初期化処理。ウィンドウを破棄する。
+		"""
+		self.root.destroy()
 
 	def additional_chart_setting(self):
 		"""
@@ -2455,7 +2466,7 @@ class Setting_Tk_Dialog(object):
 		"""
 		追加設定終了時の完了メソッド
 		"""
-		self.root.destroy()	#Tkルートウィンドウを破棄
+		self.close_window()
 
 	def initial_chart_setting(self):
 		"""
@@ -2477,17 +2488,22 @@ class Setting_Tk_Dialog(object):
 		self.download_site_Tkvar.set(DOWNLOAD_SITE_KDB)
 		#TkWidgets
 		#Entry:証券コード入力欄
-		security_code_entry = Tk.Entry(self.root,textvariable=self.security_code_Tkvar)	
-		security_code_entry.pack()
+		security_code_entry_frame = Tk.Frame(self.root)
+		security_code_entry_frame.pack()
+		Tk.Label(security_code_entry_frame,text="証券コード(東証ー数字４桁): ").pack(side="left")
+		validate_func = ( lambda key : key.isdigit() )
+		vcmd = ( self.root.register(validate_func),'%S' )	#ヴァリデートコマンド:数字だけ入力する
+		security_code_entry = Tk.Entry(security_code_entry_frame,textvariable=self.security_code_Tkvar,validate="key",vcmd=vcmd)
+		security_code_entry.pack(side="left")
 		security_code_entry.focus()
 		security_code_entry.bind("<Return>",self.done_initial_setting)
 		#Radiobutton:データダウンロードについてのモード選択
 		download_mode_radiobutton_labelframe = Tk.LabelFrame(self.root,text="ダウンロードモードの設定")
 		download_mode_radiobutton_labelframe.pack()
-		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="ローカルモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
-		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="オートモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_AUTO).pack(side="left")
-		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="差分モード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DIFF).pack(side="left")
-		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="通常ダウンロード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DOWNLOAD).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="ローカルモード(l)",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="オートモード(a)",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_AUTO).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="差分モード(d)",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DIFF).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="通常ダウンロード(s)",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DOWNLOAD).pack(side="left")
 		#Radiobutton:データダウンロードについてのサイト選択
 		download_site_radiobutton_labelframe = Tk.LabelFrame(self.root,text="データの参照先")
 		download_site_radiobutton_labelframe.pack()
@@ -2495,10 +2511,36 @@ class Setting_Tk_Dialog(object):
 		#Radiobutton:足ごとの期間の設定ボタン
 		term_for_a_bar_radiobutton_labelframe=Tk.LabelFrame(self.root,text="１足あたりの期間")	#足期間設定フレーム
 		term_for_a_bar_radiobutton_labelframe.pack()
-		for term in TERM_LIST :
-			Tk.Radiobutton(term_for_a_bar_radiobutton_labelframe,text=term,value=TERM_DICT[term],variable=self.term_for_a_bar_Tkvar).pack(side="left")
+		for term,shortcut in zip( TERM_LIST,tuple("NWDHMN") ) :
+			shortcut = ( "(%s)" % (shortcut) ) if shortcut != "N" else ""
+			text = term + shortcut
+			Tk.Radiobutton(term_for_a_bar_radiobutton_labelframe,text=text,value=TERM_DICT[term],variable=self.term_for_a_bar_Tkvar).pack(side="left")
 		#Button:OKボタン
 		Tk.Button(self.root,text="done",command=self.done_initial_setting).pack()	#Button:入力終了時self.done()が呼ばれる。
+
+		#Global Binds
+		def shortcut_bind(event):
+			#ダウンロードモード設定のショートカット
+			if event.char == "l" :
+				self.download_mode_Tkvar.set(DOWNLOAD_MODE_LOCAL)
+			elif event.char == "a" :
+				self.download_mode_Tkvar.set(DOWNLOAD_MODE_AUTO)
+			elif event.char == "d" :
+				self.download_mode_Tkvar.set(DOWNLOAD_MODE_DIFF)
+			elif event.char == "s" :
+				self.download_mode_Tkvar.set(DOWNLOAD_MODE_DOWNLOAD)
+			#足期間設定のショートカット
+			if event.char == "D" :
+				self.term_for_a_bar_Tkvar.set(TERM_DICT["日足"])
+			elif event.char == "W" :
+				self.term_for_a_bar_Tkvar.set(TERM_DICT["週足"])
+			elif event.char == "H" :
+				self.term_for_a_bar_Tkvar.set(TERM_DICT["前場後場"])
+			elif event.char == "M" :
+				self.term_for_a_bar_Tkvar.set(TERM_DICT["5分足"])
+		for char in tuple("ladsDWHM") :
+			self.root.bind("<%s>" % (char),shortcut_bind)
+
 		#Tk main_loop
 		self.root.mainloop()
 
@@ -2529,11 +2571,12 @@ class Setting_Tk_Dialog(object):
 				term_button.set_state(True)
 				buttons_for_term.draw()
 
-				self.root.destroy()	#Tkルートウィンドウを破棄
+				self.close_window()	#Tkルートウィンドウを破棄
 			else :
 				print "データのダウンロードに失敗しました"
 		else :
 			tkMessageBox.showerror(message="証券コード：正しい数字4桁を入力してください。")
+
 
 
 #General Functions-----
