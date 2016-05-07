@@ -1,4 +1,4 @@
-#! usr/bin/python
+#! /usr/bin/python
 # -*- coding: utf-8 -*-
 
 """
@@ -168,6 +168,9 @@ class Root_Container():
 	:描画について	すべての描画は、このクラスのdraw()メソッドが担い、具体的にはメンバ変数self.child_box_listに含まれるオブジェクトのdraw()関数が間接的に呼ばれることで、実際の描画が行われます。
 
 	"""
+	#Statics
+	keys_control_chart = (pygame.K_LEFT,pygame.K_RIGHT,pygame.K_UP,pygame.K_DOWN,pygame.K_h,pygame.K_j,pygame.K_k,pygame,K_l)
+
 	def __init__(self):
 		#インスタンス変数
 		self.screen = pygame.display.get_surface()
@@ -179,8 +182,6 @@ class Root_Container():
 		self.child_box_list = []	#すべてのGUI要素を含むリスト
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
-		#イベント用定数
-		self.keys_control_chart = (pygame.K_LEFT,pygame.K_RIGHT,pygame.K_UP,pygame.K_DOWN)
 
 		#初期化処理
 		self.fill_background()
@@ -318,13 +319,23 @@ class Root_Container():
 
 	def event_loop(self):
 		"""
-		イベントを補足します。ルートにおける一般的なキー入力については即時性が必要ないので、pygame.Key.get_pressedを用います。
-		それ以外はイベントキューを用います。
+		イベントを補足、処理する最上層のルーチンで、イベントの処理はpygamによって提供される２つの手段を両方用います。
+		まず、全てのキーイベントに対しては、pygame.keyモジュールの枠組みを用います。これはpygame.eventではキーリピートを補足できない為です。
+		一方、マウスイベントや、その他終了、リサイズイベントの処理についてはpygame.eventに提供されるイベントキューの枠組みを用います。
+		ただし、イベントの処理に関する情報伝達インターフェイスの統一の為、「前者の枠組みにおいても」、能動的にイベントオブジェクトを発行し、これをdiispachする。
 		"""
-		#一般のルート側でのキー処理
+		#pygame.keyを用いたキーイベント処理。Eventオブジェクトを自己発行する。
 		self.keys = pygame.key.get_pressed()
+		pressed_keys = [ index for index in range(len(self.keys)) if self.keys[index] ]	#現在押されているキーのpygame定数のリスト
+		shift_mod , ctrl_mod = (pygame.K_RSHIFT in pressed_keys or pygame.K_LSHIFT in pressed_keys) , (pygame.K_RCTRL in pressed_keys or pygame.K_LCTRL in pressed_keys)
+		mod = ( shift_mod and pygame.KMOD_SHIFT ) or ( ctrl_mod and pygame.KMOD_CTRL ) or 0
+		for key in pressed_keys :
+			if key in self.keys_control_chart :
+				event = pygame.event.Event(pygame.KEYDOWN,key=key,mod=mod)	#イベントの発行
+				focused_box = self.get_focused_box()
+				focused_box.process_KEYDOWN(event)
+			
 		#イベントキュー上の処理
-		num_of_processed_MM = 0	#MouseMotionのイベント数を管理する。多すぎてdraw()呼ばれまくりで重くなるため。
 		for event in pygame.event.get():
 			if event.type == pygame.QUIT or self.keys[pygame.K_ESCAPE] :
 				self.looping = False	#停止。
@@ -332,7 +343,7 @@ class Root_Container():
 				self.fps = 30	#滑らかに動かす
 				for child_box in self.child_box_list :
 					if child_box.collide_point(event.pos) :
-						child_box.dispatch_MOUSEBUTTONDOWN(event)
+						child_box.process_MOUSEBUTTONDOWN(event)
 						break
 			elif event.type == pygame.MOUSEBUTTONUP :
 				self.fps = 4	#プロセッサ時間の節約
@@ -341,18 +352,11 @@ class Root_Container():
 				self.set_child_box_area()
 				self.draw()
 			elif event.type == pygame.MOUSEMOTION :
-				#イベント数を３分の１にする
-				num_of_processed_MM += 1
-				if (num_of_processed_MM % 2 == 0) or (num_of_processed_MM % 5 == 0) or (num_of_processed_MM % 7 == 0) or (num_of_processed_MM % 9 ) == 0 :
-					continue
 				if event.buttons[0] :
 					for child_box in self.child_box_list :
 						if child_box.collide_point(event.pos) :
-							child_box.dispatch_MOUSEDRAG(event)
+							child_box.process_MOUSEDRAG(event)
 							break
-			elif event.type == pygame.KEYDOWN and event.key in self.keys_control_chart :
-				focused_box = self.get_focused_box()
-				focused_box.dispatch_KEYDOWN(event)
 
 	def main_loop(self):
 		"""
@@ -412,13 +416,13 @@ class Label_box(BASE_BOX):
 			left_top = (left_top[0],left_top[1]+label.height)
 		pygame.display.update(self.get_rect())
 
-	def dispatch_MOUSEMOTION(self,event) :
+	def process_MOUSEMOTION(self,event) :
 		pass
 
-	def dispatch_MOUSEBUTTONDOWN(self,event) :
+	def process_MOUSEBUTTONDOWN(self,event) :
 		pass
 
-	def dispatch_MOUSEDRAG(self,event):
+	def process_MOUSEDRAG(self,event):
 		pass
 
 
@@ -457,7 +461,7 @@ class Label(object):
 		text_surface = self.font.render(decoded,True,self.str_color)
 		surface.blit(text_surface,(20,self.MARGINE))
 
-	def dispatch_MOUSEMOTION(self,event) :
+	def process_MOUSEMOTION(self,event) :
 		pass
 
 
@@ -512,24 +516,24 @@ class Container_Box(BASE_BOX):
 		self.get_father().screen.blit(surface,rect_on_root)
 		pygame.display.update(rect_on_root)
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		#フォーカスの変更
 		focused = self.get_father().get_focused_box()	#クリック前のフォーカスBOX
 		if focused != self:
 			self.get_father().set_focused_box(self)	#フォーカスBOXの変更
 			focused.draw()	#フォーカスされていたBOXを再描画(フォーカス表示の解除のため)
 		#コンテンツにイベント処理を伝搬
-		self.get_content().dispatch_MOUSEBUTTONDOWN(event)
+		self.get_content().process_MOUSEBUTTONDOWN(event)
 
-	def dispatch_MOUSEMOTION(self,event):
-		self.get_content().dispatch_MOUSEMOTION(event)
+	def process_MOUSEMOTION(self,event):
+		self.get_content().process_MOUSEMOTION(event)
 
-	def dispatch_MOUSEDRAG(self,event):
-		self.get_content().dispatch_MOUSEDRAG(event)
+	def process_MOUSEDRAG(self,event):
+		self.get_content().process_MOUSEDRAG(event)
 		self.draw()
 
-	def dispatch_KEYDOWN(self,event):
-		self.get_content().dispatch_KEYDOWN(event)
+	def process_KEYDOWN(self,event):
+		self.get_content().process_KEYDOWN(event)
 		self.draw()
 
 
@@ -585,21 +589,21 @@ class Button_Box(BASE_BOX):
 		self.get_father().screen.blit(surface,rect)
 		pygame.display.update(rect)	
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		if event.button == 1 :
 			my_left_top = self.get_left_top()
 			x = event.pos[0] - my_left_top[0]
 			y = event.pos[1] - my_left_top[1]
 			for button in self.button_list :
 				if button.collide_point((x,y)):
-					button.dispatch_MOUSEBUTTONDOWN(event)
+					button.process_MOUSEBUTTONDOWN(event)
 					self.draw()
 					break
 	
-	def dispatch_MOUSEMOTION(self,event):
+	def process_MOUSEMOTION(self,event):
 		pass
 
-	def dispatch_MOUSEDRAG(self,event):
+	def process_MOUSEDRAG(self,event):
 		pass
 
 
@@ -683,7 +687,7 @@ class Label_of_ButtonBox(Content_of_ButtonBox):
 		w , h = surface.get_width() , surface.get_height()
 		self.set_size(left_top,w,h)
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		イベント処理は不要
 		"""
@@ -744,7 +748,7 @@ class UI_Button(Content_of_ButtonBox):
 		"""
 		self.state = not self.state
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		ボタンの状態を変える前に定義されたコマンドを実行し、そのコマンドが正常に実行されたら、ボタンの状態を変える。
 		"""
@@ -765,7 +769,7 @@ class No_Swith_Button(UI_Button):
 		UI_Button.__init__(self,string,id_str,command)
 		self.state = None	#このオブジェクトは状態を持たない
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		このオブジェクトは状態を持たないので、ただ、ボタンが押された時には、規定のバインド関数を実行します。それ以上は何もしません。
 		"""
@@ -1239,6 +1243,9 @@ class Stock_Chart(Content):
 		if isinstance(data,(list,tuple)) and data :
 			self.stock_price_list = tuple(data)
 			self.set_drawing_index( end =len(data) -1 )
+
+	def get_price_data(self):
+		return self.stock_price_list
 
 	def download_price_data(self):
 		"""
@@ -2239,6 +2246,7 @@ class Stock_Chart(Content):
 		ハイライト表示する要素のindex値の定義を行うインターフェイス。
 		"""
 		self._highlight_index = index
+		self.print_highlight_price_information()
 
 	def get_highlight_index(self):
 		"""
@@ -2292,6 +2300,25 @@ class Stock_Chart(Content):
 		general_labels[1].set_string("高: %d  安: %d  始: %d  終: %d  出来高: %s  売買高: %s" % (high,low,opning,closing,turnover,kinngaku))
 		general_label_box.draw()
 
+	def move_highlight(self,val):
+		"""
+		ハイライトインデックスのval値だけの移動とそれにバインドされるべきメソッド群の呼び出しのセット
+		"""
+		highlight_index = self.get_highlight_index()
+		drawing_start , drawing_end = self.get_drawing_index()
+		if highlight_index + val in range(drawing_start,drawing_end) :
+			self.set_highlight_index( highlight_index + val )		
+
+	def move_drawing_index(self,val):
+		"""
+		描画インデックスをval値だけ移動させる。
+		"""
+		start , end = self.get_drawing_index()
+		chart_end = len(self.get_price_data())
+		if 0 <= start + val and end + val <= chart_end :
+			self.set_drawing_index(end = end+val)
+			self.set_highlight_index(self.get_drawing_index()[1])
+
 	def zoom_up(self,step=1):
 		"""
 		チャートにおける個々の足の大きさを定義するズームスケールを拡大させる
@@ -2312,7 +2339,7 @@ class Stock_Chart(Content):
 			return False
 		self.set_zoom_scale(new_scale)
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		"""
 		#水平ルーラーにコライドしているのならフラグを上げる
@@ -2333,12 +2360,11 @@ class Stock_Chart(Content):
 				self.set_highlight_index(index)
 				parent.draw()
 				break
-		self.print_highlight_price_information()
 
-	def dispatch_MOUSEMOTION(self,event):
+	def process_MOUSEMOTION(self,event):
 		pass	
 
-	def dispatch_MOUSEDRAG(self,event):
+	def process_MOUSEDRAG(self,event):
 		"""
 		ドラッグでチャート画面を移動させる。
 		または水平ルーラーを移動させる
@@ -2360,24 +2386,35 @@ class Stock_Chart(Content):
 		if end_index - self._num_of_candle - moving_val >= 0 and len(self.stock_price_list) > end_index - moving_val :
 			self.set_drawing_index( end=end_index - moving_val )
 
-	def dispatch_KEYDOWN(self,event):
+	def process_KEYDOWN(self,event):
 		"""
-		矢印キーでオプションの設定を行う
+		キーバインドについての定義を行う。
+		hj:左、kl:右。SHIFT時:チャート移動。Ctrl+jk:サイズ変更
 		"""
-		start_index,end_index = self.get_drawing_index()
-		highlight_index = self.get_highlight_index()
-		if event.key == pygame.K_LEFT :
-			self.set_highlight_index(highlight_index-1)
-			self.print_highlight_price_information()
-		elif event.key == pygame.K_RIGHT and highlight_index < len(self.stock_price_list)-1:
-			self.set_highlight_index(highlight_index+1)
-			self.print_highlight_price_information()
-		elif event.key == pygame.K_UP :
-			self.zoom_up()
-		elif event.key == pygame.K_DOWN :
-			self.zoom_down()
-		else :
-			pass
+		LEFTS = ( pygame.K_LEFT , pygame.K_h , pygame.K_j )
+		RIGHTS = ( pygame.K_RIGHT , pygame.K_l ,pygame.K_k )
+		#キーモディファ未定義時
+		if not event.mod :
+			if event.key in LEFTS:
+				self.move_highlight(-1)
+			elif event.key in RIGHTS :
+				self.move_highlight(+1)
+			elif event.key == pygame.K_UP :
+				self.zoom_up()
+			elif event.key == pygame.K_DOWN :
+				self.zoom_down()
+		#シフトモディファ時
+		elif event.mod == pygame.KMOD_SHIFT :
+			if event.key in LEFTS:
+				self.move_drawing_index(-10)
+			elif event.key in RIGHTS :
+				self.move_drawing_index(+10)
+		#コントロールモディファ時
+		elif event.mod == pygame.KMOD_CTRL :
+			if event.key in ( pygame.K_UP , pygame.K_k ):
+				self.zoom_up()
+			elif event.key in ( pygame.K_DOWN , pygame.K_j ):
+				self.zoom_down()
 
 
 class Get_Url_Parser(HTMLParser):
