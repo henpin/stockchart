@@ -50,6 +50,7 @@ TERM2URL_DICT = {"日足":"1d","前場後場":"4h","5分足":"5min","1分足":"m
 FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
 BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
 CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
+HISTORY_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)),"history")
 #About Download Mode
 DOWNLOAD_MODE_LOCAL = 1
 DOWNLOAD_MODE_AUTO = 2
@@ -346,7 +347,7 @@ class Root_Container():
 						child_box.process_MOUSEBUTTONDOWN(event)
 						break
 			elif event.type == pygame.MOUSEBUTTONUP :
-				self.fps = 4	#プロセッサ時間の節約
+				self.fps = 10	#プロセッサ時間の節約
 			elif event.type == pygame.VIDEORESIZE :
 				self.screen = pygame.display.set_mode(event.size,pygame.VIDEORESIZE)
 				self.set_child_box_area()
@@ -2306,7 +2307,7 @@ class Stock_Chart(Content):
 		"""
 		highlight_index = self.get_highlight_index()
 		drawing_start , drawing_end = self.get_drawing_index()
-		if highlight_index + val in range(drawing_start,drawing_end) :
+		if highlight_index + val in range(drawing_start,drawing_end+1) :
 			self.set_highlight_index( highlight_index + val )		
 
 	def move_drawing_index(self,val):
@@ -2491,6 +2492,30 @@ class Setting_Tk_Dialog(object):
 		"""
 		self.root.destroy()
 
+	def load_history(self):
+		"""
+		履歴ファイルを読み、履歴のリストを返す。
+		"""
+		f = open(HISTORY_FILE,"r")
+		historys = [ hi for hi in f.read().split("\n") if hi.isdigit() ]
+		f.close()
+		return historys
+
+	def write_history(self,security_code):
+		"""
+		証券コードを引数に取り、履歴ファイルに書く。
+		"""
+		if not isinstance(security_code,int) and not str(security_code).isdigit() :
+			raise Exception("引数が不正です")
+		historys = self.load_history()
+		f = open(HISTORY_FILE,"w")
+
+		for hi in historys :
+			if hi != security_code :
+				f.write(hi+'\n')
+		f.write(security_code)
+		f.close()
+
 	def additional_chart_setting(self):
 		"""
 		チャートについてのオプショナルな要素についての追加設定用画面
@@ -2552,6 +2577,12 @@ class Setting_Tk_Dialog(object):
 			shortcut = ( "(%s)" % (shortcut) ) if shortcut != "N" else ""
 			text = term + shortcut
 			Tk.Radiobutton(term_for_a_bar_radiobutton_labelframe,text=text,value=TERM_DICT[term],variable=self.term_for_a_bar_Tkvar).pack(side="left")
+		#CheckButton:履歴
+		history_frame = Tk.LabelFrame(self.root,text="履歴")
+		history_frame.pack()
+		historys = self.load_history()
+		for hi in historys :
+			Tk.Radiobutton(history_frame,text=hi,variable=self.security_code_Tkvar,value=hi).pack()
 		#Button:OKボタン
 		Tk.Button(self.root,text="done",command=self.done_initial_setting).pack()	#Button:入力終了時self.done()が呼ばれる。
 
@@ -2609,6 +2640,8 @@ class Setting_Tk_Dialog(object):
 				buttons_for_term.draw()
 
 				self.close_window()	#Tkルートウィンドウを破棄
+				#履歴の書き込み
+				self.write_history(security_code)
 			else :
 				print "データのダウンロードに失敗しました"
 		else :
