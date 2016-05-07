@@ -1,4 +1,4 @@
-#! usr/bin/python
+#! /usr/bin/python
 # -*- coding: utf-8 -*-
 
 """
@@ -50,6 +50,7 @@ TERM2URL_DICT = {"日足":"1d","前場後場":"4h","5分足":"5min","1分足":"m
 FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
 BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
 CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
+HISTORY_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)),"history")
 #About Download Mode
 DOWNLOAD_MODE_LOCAL = 1
 DOWNLOAD_MODE_AUTO = 2
@@ -168,6 +169,9 @@ class Root_Container():
 	:描画について	すべての描画は、このクラスのdraw()メソッドが担い、具体的にはメンバ変数self.child_box_listに含まれるオブジェクトのdraw()関数が間接的に呼ばれることで、実際の描画が行われます。
 
 	"""
+	#Statics
+	keys_control_chart = (pygame.K_LEFT,pygame.K_RIGHT,pygame.K_UP,pygame.K_DOWN,pygame.K_h,pygame.K_j,pygame.K_k,pygame,K_l)
+
 	def __init__(self):
 		#インスタンス変数
 		self.screen = pygame.display.get_surface()
@@ -179,8 +183,6 @@ class Root_Container():
 		self.child_box_list = []	#すべてのGUI要素を含むリスト
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
-		#イベント用定数
-		self.keys_control_chart = (pygame.K_LEFT,pygame.K_RIGHT,pygame.K_UP,pygame.K_DOWN)
 
 		#初期化処理
 		self.fill_background()
@@ -318,13 +320,23 @@ class Root_Container():
 
 	def event_loop(self):
 		"""
-		イベントを補足します。ルートにおける一般的なキー入力については即時性が必要ないので、pygame.Key.get_pressedを用います。
-		それ以外はイベントキューを用います。
+		イベントを補足、処理する最上層のルーチンで、イベントの処理はpygameによって提供される２つの手段を両方用います。
+		まず、全てのキーイベントに対しては、pygame.keyモジュールの枠組みを用います。これはpygame.eventではキーリピートを補足できない為です。
+		一方、マウスイベントや、その他終了、リサイズイベントの処理についてはpygame.eventに提供されるイベントキューの枠組みを用います。
+		ただし、イベントの処理に関する情報伝達インターフェイスの統一の為、「前者の枠組みにおいても」、能動的にイベントオブジェクトを発行し、これをdiispachする。
 		"""
-		#一般のルート側でのキー処理
+		#pygame.keyを用いたキーイベント処理。Eventオブジェクトを自己発行する。
 		self.keys = pygame.key.get_pressed()
+		pressed_keys = [ index for index in range(len(self.keys)) if self.keys[index] ]	#現在押されているキーのpygame定数のリスト
+		shift_mod , ctrl_mod = (pygame.K_RSHIFT in pressed_keys or pygame.K_LSHIFT in pressed_keys) , (pygame.K_RCTRL in pressed_keys or pygame.K_LCTRL in pressed_keys)
+		mod = ( shift_mod and pygame.KMOD_SHIFT ) or ( ctrl_mod and pygame.KMOD_CTRL ) or 0
+		for key in pressed_keys :
+			if key in self.keys_control_chart :
+				event = pygame.event.Event(pygame.KEYDOWN,key=key,mod=mod)	#イベントの発行
+				focused_box = self.get_focused_box()
+				focused_box.process_KEYDOWN(event)
+
 		#イベントキュー上の処理
-		num_of_processed_MM = 0	#MouseMotionのイベント数を管理する。多すぎてdraw()呼ばれまくりで重くなるため。
 		for event in pygame.event.get():
 			if event.type == pygame.QUIT or self.keys[pygame.K_ESCAPE] :
 				self.looping = False	#停止。
@@ -332,27 +344,20 @@ class Root_Container():
 				self.fps = 30	#滑らかに動かす
 				for child_box in self.child_box_list :
 					if child_box.collide_point(event.pos) :
-						child_box.dispatch_MOUSEBUTTONDOWN(event)
+						child_box.process_MOUSEBUTTONDOWN(event)
 						break
 			elif event.type == pygame.MOUSEBUTTONUP :
-				self.fps = 4	#プロセッサ時間の節約
+				self.fps = 10	#プロセッサ時間の節約
 			elif event.type == pygame.VIDEORESIZE :
 				self.screen = pygame.display.set_mode(event.size,pygame.VIDEORESIZE)
 				self.set_child_box_area()
 				self.draw()
 			elif event.type == pygame.MOUSEMOTION :
-				#イベント数を３分の１にする
-				num_of_processed_MM += 1
-				if (num_of_processed_MM % 2 == 0) or (num_of_processed_MM % 5 == 0) or (num_of_processed_MM % 7 == 0) or (num_of_processed_MM % 9 ) == 0 :
-					continue
 				if event.buttons[0] :
 					for child_box in self.child_box_list :
 						if child_box.collide_point(event.pos) :
-							child_box.dispatch_MOUSEDRAG(event)
+							child_box.process_MOUSEDRAG(event)
 							break
-			elif event.type == pygame.KEYDOWN and event.key in self.keys_control_chart :
-				focused_box = self.get_focused_box()
-				focused_box.dispatch_KEYDOWN(event)
 
 	def main_loop(self):
 		"""
@@ -412,13 +417,13 @@ class Label_box(BASE_BOX):
 			left_top = (left_top[0],left_top[1]+label.height)
 		pygame.display.update(self.get_rect())
 
-	def dispatch_MOUSEMOTION(self,event) :
+	def process_MOUSEMOTION(self,event) :
 		pass
 
-	def dispatch_MOUSEBUTTONDOWN(self,event) :
+	def process_MOUSEBUTTONDOWN(self,event) :
 		pass
 
-	def dispatch_MOUSEDRAG(self,event):
+	def process_MOUSEDRAG(self,event):
 		pass
 
 
@@ -430,7 +435,7 @@ class Label(object):
 	3,描画
 	"""
 	def __init__(self,string=None,str_color=None,font=None) :
-		self.font = font or pygame.font.Font(FONT_NAME,15)	#文字の描画に用いられるフォント
+		self.font = font or pygame.font.Font(FONT_NAME,14)	#文字の描画に用いられるフォント
 		self.initial_string = "セッティングにはKEYを押してください。"	#文字列非設定時のデフォルト値
 		self.str_color = str_color or (0,0,0)
 		self.string = string or self.initial_string	#実際に描画される文字列
@@ -457,7 +462,7 @@ class Label(object):
 		text_surface = self.font.render(decoded,True,self.str_color)
 		surface.blit(text_surface,(20,self.MARGINE))
 
-	def dispatch_MOUSEMOTION(self,event) :
+	def process_MOUSEMOTION(self,event) :
 		pass
 
 
@@ -473,7 +478,7 @@ class Container_Box(BASE_BOX):
 		if content :
 			self.set_content(content)
 		self.child_box_list = None	#拡張性のため子BOXを考えている。ただし、コンテンツとの共存は考えていない。
-		self.font = font or pygame.font.Font(FONT_NAME,14)
+		self.font = font or pygame.font.Font(FONT_NAME,13)
 		self.bold_font = pygame.font.Font(BOLD_FONT_NAME,13)
 		self.height_prefix = False	#動的な大きさか静的な大きさか。デフォルトは前者。
 		self.width_prefix = False
@@ -512,24 +517,24 @@ class Container_Box(BASE_BOX):
 		self.get_father().screen.blit(surface,rect_on_root)
 		pygame.display.update(rect_on_root)
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		#フォーカスの変更
 		focused = self.get_father().get_focused_box()	#クリック前のフォーカスBOX
 		if focused != self:
 			self.get_father().set_focused_box(self)	#フォーカスBOXの変更
 			focused.draw()	#フォーカスされていたBOXを再描画(フォーカス表示の解除のため)
 		#コンテンツにイベント処理を伝搬
-		self.get_content().dispatch_MOUSEBUTTONDOWN(event)
+		self.get_content().process_MOUSEBUTTONDOWN(event)
 
-	def dispatch_MOUSEMOTION(self,event):
-		self.get_content().dispatch_MOUSEMOTION(event)
+	def process_MOUSEMOTION(self,event):
+		self.get_content().process_MOUSEMOTION(event)
 
-	def dispatch_MOUSEDRAG(self,event):
-		self.get_content().dispatch_MOUSEDRAG(event)
+	def process_MOUSEDRAG(self,event):
+		self.get_content().process_MOUSEDRAG(event)
 		self.draw()
 
-	def dispatch_KEYDOWN(self,event):
-		self.get_content().dispatch_KEYDOWN(event)
+	def process_KEYDOWN(self,event):
+		self.get_content().process_KEYDOWN(event)
 		self.draw()
 
 
@@ -543,7 +548,7 @@ class Button_Box(BASE_BOX):
 		self.bgcolor = bgcolor or BACKGROUND_COLOR
 		self.set_parent(parent)
 		self.button_list = []
-		self.font = font or pygame.font.Font(FONT_NAME,15)
+		self.font = font or pygame.font.Font(FONT_NAME,14)
 		self.id_str = id_str
 		self.height_prefix = True
 		self.width_prefix = False
@@ -585,21 +590,21 @@ class Button_Box(BASE_BOX):
 		self.get_father().screen.blit(surface,rect)
 		pygame.display.update(rect)	
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		if event.button == 1 :
 			my_left_top = self.get_left_top()
 			x = event.pos[0] - my_left_top[0]
 			y = event.pos[1] - my_left_top[1]
 			for button in self.button_list :
 				if button.collide_point((x,y)):
-					button.dispatch_MOUSEBUTTONDOWN(event)
+					button.process_MOUSEBUTTONDOWN(event)
 					self.draw()
 					break
 	
-	def dispatch_MOUSEMOTION(self,event):
+	def process_MOUSEMOTION(self,event):
 		pass
 
-	def dispatch_MOUSEDRAG(self,event):
+	def process_MOUSEDRAG(self,event):
 		pass
 
 
@@ -683,7 +688,7 @@ class Label_of_ButtonBox(Content_of_ButtonBox):
 		w , h = surface.get_width() , surface.get_height()
 		self.set_size(left_top,w,h)
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		イベント処理は不要
 		"""
@@ -744,7 +749,7 @@ class UI_Button(Content_of_ButtonBox):
 		"""
 		self.state = not self.state
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		ボタンの状態を変える前に定義されたコマンドを実行し、そのコマンドが正常に実行されたら、ボタンの状態を変える。
 		"""
@@ -765,7 +770,7 @@ class No_Swith_Button(UI_Button):
 		UI_Button.__init__(self,string,id_str,command)
 		self.state = None	#このオブジェクトは状態を持たない
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		このオブジェクトは状態を持たないので、ただ、ボタンが押された時には、規定のバインド関数を実行します。それ以上は何もしません。
 		"""
@@ -805,24 +810,30 @@ class Tab(object):
 class Horizontal_Ruler(object):
 	"""
 	Stock_Chartオブジェクトにおいて用いられる水平バーを表現するオブジェクト。
+	このオブジェクトは内部に「価格データ」を格納し、描画関数が呼び出されるたびに座標値へ変換する。
+	これは価格の座標値への変換式が動的に生成されるため避けがたい事情がある。
+
+	また、このオブジェクトは「バーのタイプ」を一種のid情報として格納する。
+	親チャートオブジェクトはこのタイプの値に基づいて、多数格納されたこのオブジェクト郡から目的のバーを検索することになる。
 	"""
-	def __init__(self,chart,price,color):
+	def __init__(self,parent,ruler_type,price,color):
 		"""
 		"""
-		if not isinstance(chart,Stock_Chart) :
-			raise Exception("不正な型です")
-		self.chart = chart	#親となるチャート
+		if not isinstance(parent,Stock_Chart) or ( not ruler_type in ("H","L","M") ) :
+			raise Exception("不正な型の引数です: parent=%s,ruler_type=%s" % (parent,ruler_type))
+		self.type = ruler_type
+		self.parent = parent	#親となるチャート
 		self.price = price
 		self.color = color
 		self._drawing_rect = None	#描画範囲を表現するRectで、描画時設定される。インターフェイスを用いてアクセスする。
 
-	def draw_to_surface(self,surface,font) :
+	def draw_to_surface(self,surface,font):
 		"""
 		水平ルーラーを描画するメソッド。
 		引数として与えられたサーフェスに直接描画する
 		このメソッドの呼び出し元は、このメソッド終了後、サーフェスをY軸方向にフリップするのでテキストは予めフリップしておく必要がある
 		"""
-		drawing_height = self.chart.price_to_height(self.price)
+		drawing_height = self.parent.price_to_height(self.price)
 		price_renderd = font.render(unicode(str(self.price),"utf-8"),True,FOREGROUND_COLOR)
 		flipped = pygame.transform.flip(price_renderd,False,True)
 		drawing_price_renderd_H = drawing_height - (price_renderd.get_height()/2)
@@ -855,9 +866,12 @@ class Horizontal_Ruler(object):
 	def set_price(self,price):
 		self.price = price
 
+	def get_price(self):
+		return self.price
+
 	def collide(self,pos):
 		"""
-		与えられたposと衝突しているか否かを返す
+		与えられたposとこのオブジェクトの価格表示領域が衝突しているか否かを返す
 		"""
 		rect = self.get_drawing_rect()
 		if rect.collidepoint(pos) :
@@ -1092,6 +1106,7 @@ class Stock_Chart(Content):
 		#定められたインターフェイスによってのみ扱われるべき変数
 		#チャート描画に関するメンバ変数
 		self._zoom_scale = 1 	#イベント用
+		self.zoom_scale_step = 0.5
 		self.right_side_padding = 20	#右端のパッディング
 		self.left_side_padiing = 14	#左端のパッディング
 		self.vertical_padding = 20
@@ -1121,6 +1136,8 @@ class Stock_Chart(Content):
 	def initialize_data(self,reload_data=False):
 		"""
 		動的なデータに関する初期化処理。
+		__init__メソッドでは呼び出しが行われない。
+		これはこのメソッドが動的なデータの生成に成功したか否かをこのメソッドの呼び出し元に単純に返すためである。
 		1,対象データのフェッチ、コンバート、格納を行う
 		2,設定された株価データをもとに、移動平均オブジェクトmoving_averagesの設定。
 		3,設定されたmoving_averagesを元に、実質的価値算出オブジェクトAA_analyserの設定。
@@ -1228,6 +1245,9 @@ class Stock_Chart(Content):
 			self.stock_price_list = tuple(data)
 			self.set_drawing_index( end =len(data) -1 )
 
+	def get_price_data(self):
+		return self.stock_price_list
+
 	def download_price_data(self):
 		"""
 		CSVデータのダウンロードを行うインターフェイスです。
@@ -1306,7 +1326,7 @@ class Stock_Chart(Content):
 			epoctime = os.stat(self.convert_self_to_filename()).st_mtime
 			date = Date.fromtimestamp(epoctime)
 			today = Date.today()
-			return today == data
+			return today == date
 		else :
 			return existing
 	
@@ -1629,9 +1649,11 @@ class Stock_Chart(Content):
 		surface.blit(surface_drawn_actual_account,(0,0))
 
 	def get_drawing_size(self):
+		"""
+		"""
 		zoom_scale = self.get_zoom_scale()
-		candle_width = int(zoom_scale * 4)
-		padding_size = int(zoom_scale * 4)
+		candle_width = int(round(zoom_scale * 4))
+		padding_size = int(round(zoom_scale * 4))
 		return candle_width,padding_size
 	
 	def get_surface(self,surface_size,color_key=BACKGROUND_COLOR):
@@ -1686,7 +1708,7 @@ class Stock_Chart(Content):
 			pygame.draw.rect(surface,candle_color,rect,candle_width)
 			line_start_pos = (pos_x , self.price_to_height(high_price) )
 			line_end_pos = (pos_x , self.price_to_height(low_price) )
-			line_width = int(zoom_scale*2)
+			line_width = int(zoom_scale * 2)
 			pygame.draw.line(surface,candle_color,line_start_pos,line_end_pos,line_width)
 		surface = pygame.transform.flip(surface,False,True)
 		return surface
@@ -1967,6 +1989,24 @@ class Stock_Chart(Content):
 		flipped_surface = pygame.transform.flip(surface,False,True)
 		return flipped_surface
 
+	def get_horizontal_ruler(self,ruler_type):
+		"""
+		水平ルーラーのタイプを表現する文字列"H"/"L"/"M"を引数に、そのルーラータイプで定義されたHorizontal_Rulerオブジェクトを返します。
+		"""
+		if not ruler_type in ("H","L","M") :
+			raise Exception("不正な引数です")
+		for ruler in self.horizontal_rulers :
+			if ruler.type == ruler_type :
+				return ruler
+		raise Exception("指示された要素が見つかりませんでした")
+
+	def set_horizontal_rulers_price(self,ruler_type,price):
+		"""
+		引数で指示された水平ルーラータイプで定義されたルーラーオブジェクトの価格を設定するインターフェイス
+		"""
+		ruler = self.get_horizontal_ruler(ruler_type)
+		ruler.set_price(price)
+
 	def set_default_horizontal_rulers(self):
 		"""
 		デフォルトの設定で水平ルーラを定義します。
@@ -1977,12 +2017,35 @@ class Stock_Chart(Content):
 		start , end = self.get_drawing_index()
 		high_price , low_price , price_range = self.get_price_range(self.stock_price_list[start:end])
 		last_day_closing_price = self.stock_price_list[-1][self.pricetype2index("C")]
-		high_ruler = Horizontal_Ruler(self,high_price,(255,100,100))
-		low_ruler = Horizontal_Ruler(self,low_price,(100,100,255))
-		close_ruler = Horizontal_Ruler(self,last_day_closing_price,(100,255,100))
+		high_ruler = Horizontal_Ruler(self,"H",high_price,(255,100,100))
+		low_ruler = Horizontal_Ruler(self,"L",low_price,(100,100,255))
+		close_ruler = Horizontal_Ruler(self,"M",last_day_closing_price,(100,255,100))
 		self.horizontal_rulers.append(high_ruler)
 		self.horizontal_rulers.append(low_ruler)
 		self.horizontal_rulers.append(close_ruler)
+
+	def set_horizontal_rulers_prices_default(self):
+		"""
+		水平ルーラーの価格状態をデフォルトー即ち「描画領域中の最高値」、「描画領域中の最安値」、「最近の終値」に再設定します。
+		"""
+		start , end = self.get_drawing_index()
+		high_price , low_price , price_range = self.get_price_range(self.stock_price_list[start:end])
+		last_day_closing_price = self.stock_price_list[-1][self.pricetype2index("C")]
+		#Do setting
+		self.set_horizontal_rulers_price("H",high_price)
+		self.set_horizontal_rulers_price("L",low_price)
+		self.set_horizontal_rulers_price("M",last_day_closing_price)
+
+	def set_middle_horizontal_rulers_price_center(self):
+		"""
+		中間の水平ルーラーとして定義されているルーラーオブジェクトの価格を、
+		定義されている高値のルーラーと安値のルーラーのちょうど中間値に来るように再定義します。
+		"""
+		high_ruler_price = self.get_horizontal_ruler("H").get_price()
+		low_ruler_price = self.get_horizontal_ruler("L").get_price()
+		average = float( high_ruler_price + low_ruler_price ) / 2
+		#Do setting
+		self.set_horizontal_rulers_price("M",float(average))
 	
 	def draw_coordinate_axis(self,surface_size,high_price,low_price,font):
 		"""
@@ -2184,6 +2247,7 @@ class Stock_Chart(Content):
 		ハイライト表示する要素のindex値の定義を行うインターフェイス。
 		"""
 		self._highlight_index = index
+		self.print_highlight_price_information()
 
 	def get_highlight_index(self):
 		"""
@@ -2237,7 +2301,46 @@ class Stock_Chart(Content):
 		general_labels[1].set_string("高: %d  安: %d  始: %d  終: %d  出来高: %s  売買高: %s" % (high,low,opning,closing,turnover,kinngaku))
 		general_label_box.draw()
 
-	def dispatch_MOUSEBUTTONDOWN(self,event):
+	def move_highlight(self,val):
+		"""
+		ハイライトインデックスのval値だけの移動とそれにバインドされるべきメソッド群の呼び出しのセット
+		"""
+		highlight_index = self.get_highlight_index()
+		drawing_start , drawing_end = self.get_drawing_index()
+		if highlight_index + val in range(drawing_start,drawing_end+1) :
+			self.set_highlight_index( highlight_index + val )		
+
+	def move_drawing_index(self,val):
+		"""
+		描画インデックスをval値だけ移動させる。
+		"""
+		start , end = self.get_drawing_index()
+		chart_end = len(self.get_price_data())
+		if 0 <= start + val and end + val <= chart_end :
+			self.set_drawing_index(end = end+val)
+			self.set_highlight_index(self.get_drawing_index()[1])
+
+	def zoom_up(self,step=1):
+		"""
+		チャートにおける個々の足の大きさを定義するズームスケールを拡大させる
+		どれだけ拡大させるかはself.zoom_scale_stepと、この引数に与えられたstep量によって決まる。
+		"""
+		new_scale = self.get_zoom_scale() + ( step * self.zoom_scale_step )
+		if new_scale > 3 :
+			return False
+		self.set_zoom_scale(new_scale)
+
+	def zoom_down(self,step=1):
+		"""
+		チャートにおける個々の足の大きさを定義するズームスケールを縮小させる
+		どれだけ縮小させるかはself.zoom_scale_stepと、この引数に与えられたstep量によって決まる。
+		"""
+		new_scale = self.get_zoom_scale() - ( step * self.zoom_scale_step )
+		if new_scale <= 0 :
+			return False
+		self.set_zoom_scale(new_scale)
+
+	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		"""
 		#水平ルーラーにコライドしているのならフラグを上げる
@@ -2258,12 +2361,11 @@ class Stock_Chart(Content):
 				self.set_highlight_index(index)
 				parent.draw()
 				break
-		self.print_highlight_price_information()
 
-	def dispatch_MOUSEMOTION(self,event):
+	def process_MOUSEMOTION(self,event):
 		pass	
 
-	def dispatch_MOUSEDRAG(self,event):
+	def process_MOUSEDRAG(self,event):
 		"""
 		ドラッグでチャート画面を移動させる。
 		または水平ルーラーを移動させる
@@ -2285,24 +2387,36 @@ class Stock_Chart(Content):
 		if end_index - self._num_of_candle - moving_val >= 0 and len(self.stock_price_list) > end_index - moving_val :
 			self.set_drawing_index( end=end_index - moving_val )
 
-	def dispatch_KEYDOWN(self,event):
+	def process_KEYDOWN(self,event):
 		"""
-		矢印キーでオプションの設定を行う
+		キーバインドについての定義を行う。
+		hj:左、kl:右。SHIFT時:チャート移動。Ctrl+jk:サイズ変更
 		"""
-		start_index,end_index = self.get_drawing_index()
-		highlight_index = self.get_highlight_index()
-		if event.key == pygame.K_LEFT :
-			self.set_highlight_index(highlight_index-1)
-			self.print_highlight_price_information()
-		elif event.key == pygame.K_RIGHT and highlight_index < len(self.stock_price_list)-1:
-			self.set_highlight_index(highlight_index+1)
-			self.print_highlight_price_information()
-		elif event.key == pygame.K_UP :
-			self.set_zoom_scale(self.get_zoom_scale()+0.5)
-		elif event.key == pygame.K_DOWN and self._zoom_scale >= 1:
-			self.set_zoom_scale(self.get_zoom_scale()-0.5)
-		else :
-			pass
+		LEFTS = ( pygame.K_LEFT , pygame.K_h , pygame.K_j )
+		RIGHTS = ( pygame.K_RIGHT , pygame.K_l ,pygame.K_k )
+		#キーモディファ未定義時
+		if not event.mod :
+			if event.key in LEFTS:
+				self.move_highlight(-1)
+			elif event.key in RIGHTS :
+				self.move_highlight(+1)
+			elif event.key == pygame.K_UP :
+				self.zoom_up()
+			elif event.key == pygame.K_DOWN :
+				self.zoom_down()
+		#シフトモディファ時
+		elif event.mod == pygame.KMOD_SHIFT :
+			if event.key in LEFTS:
+				self.move_drawing_index(-10)
+			elif event.key in RIGHTS :
+				self.move_drawing_index(+10)
+		#コントロールモディファ時
+		elif event.mod == pygame.KMOD_CTRL :
+			if event.key in ( pygame.K_UP , pygame.K_k ):
+				self.zoom_up()
+			elif event.key in ( pygame.K_DOWN , pygame.K_j ):
+				self.zoom_down()
+
 
 class Get_Url_Parser(HTMLParser):
 	"""
@@ -2369,6 +2483,38 @@ class Setting_Tk_Dialog(object):
 		#Tkの呼び出し
 		self.root = Tk.Tk()	#Tkのルートウィンドウ
 		self.root.title("設定画面")
+		#グローバルなイベントのバインディング
+		self.root.bind("<Escape>",self.close_window)
+
+	def close_window(self,Nouse=None):
+		"""
+		Tkの再初期化処理。ウィンドウを破棄する。
+		"""
+		self.root.destroy()
+
+	def load_history(self):
+		"""
+		履歴ファイルを読み、履歴のリストを返す。
+		"""
+		f = open(HISTORY_FILE,"r")
+		historys = [ hi for hi in f.read().split("\n") if hi.isdigit() ]
+		f.close()
+		return historys
+
+	def write_history(self,security_code):
+		"""
+		証券コードを引数に取り、履歴ファイルに書く。
+		"""
+		if not isinstance(security_code,int) and not str(security_code).isdigit() :
+			raise Exception("引数が不正です")
+		historys = self.load_history()
+		f = open(HISTORY_FILE,"w")
+
+		for hi in historys :
+			if hi != security_code :
+				f.write(hi+'\n')
+		f.write(security_code)
+		f.close()
 
 	def additional_chart_setting(self):
 		"""
@@ -2382,7 +2528,7 @@ class Setting_Tk_Dialog(object):
 		"""
 		追加設定終了時の完了メソッド
 		"""
-		self.root.destroy()	#Tkルートウィンドウを破棄
+		self.close_window()
 
 	def initial_chart_setting(self):
 		"""
@@ -2404,17 +2550,22 @@ class Setting_Tk_Dialog(object):
 		self.download_site_Tkvar.set(DOWNLOAD_SITE_KDB)
 		#TkWidgets
 		#Entry:証券コード入力欄
-		security_code_entry = Tk.Entry(self.root,textvariable=self.security_code_Tkvar)	
-		security_code_entry.pack()
+		security_code_entry_frame = Tk.Frame(self.root)
+		security_code_entry_frame.pack()
+		Tk.Label(security_code_entry_frame,text="証券コード(東証ー数字４桁): ").pack(side="left")
+		validate_func = ( lambda key : key.isdigit() )
+		vcmd = ( self.root.register(validate_func),'%S' )	#ヴァリデートコマンド:数字だけ入力する
+		security_code_entry = Tk.Entry(security_code_entry_frame,textvariable=self.security_code_Tkvar,validate="key",vcmd=vcmd)
+		security_code_entry.pack(side="left")
 		security_code_entry.focus()
 		security_code_entry.bind("<Return>",self.done_initial_setting)
 		#Radiobutton:データダウンロードについてのモード選択
 		download_mode_radiobutton_labelframe = Tk.LabelFrame(self.root,text="ダウンロードモードの設定")
 		download_mode_radiobutton_labelframe.pack()
-		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="ローカルモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
-		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="オートモード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_AUTO).pack(side="left")
-		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="差分モード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DIFF).pack(side="left")
-		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="通常ダウンロード",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DOWNLOAD).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="ローカルモード(l)",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_LOCAL).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="オートモード(a)",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_AUTO).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="差分モード(d)",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DIFF).pack(side="left")
+		Tk.Radiobutton(download_mode_radiobutton_labelframe,text="通常ダウンロード(s)",variable=self.download_mode_Tkvar,value=DOWNLOAD_MODE_DOWNLOAD).pack(side="left")
 		#Radiobutton:データダウンロードについてのサイト選択
 		download_site_radiobutton_labelframe = Tk.LabelFrame(self.root,text="データの参照先")
 		download_site_radiobutton_labelframe.pack()
@@ -2422,10 +2573,42 @@ class Setting_Tk_Dialog(object):
 		#Radiobutton:足ごとの期間の設定ボタン
 		term_for_a_bar_radiobutton_labelframe=Tk.LabelFrame(self.root,text="１足あたりの期間")	#足期間設定フレーム
 		term_for_a_bar_radiobutton_labelframe.pack()
-		for term in TERM_LIST :
-			Tk.Radiobutton(term_for_a_bar_radiobutton_labelframe,text=term,value=TERM_DICT[term],variable=self.term_for_a_bar_Tkvar).pack(side="left")
+		for term,shortcut in zip( TERM_LIST,tuple("NWDHMN") ) :
+			shortcut = ( "(%s)" % (shortcut) ) if shortcut != "N" else ""
+			text = term + shortcut
+			Tk.Radiobutton(term_for_a_bar_radiobutton_labelframe,text=text,value=TERM_DICT[term],variable=self.term_for_a_bar_Tkvar).pack(side="left")
+		#CheckButton:履歴
+		history_frame = Tk.LabelFrame(self.root,text="履歴")
+		history_frame.pack()
+		historys = self.load_history()
+		for hi in historys :
+			Tk.Radiobutton(history_frame,text=hi,variable=self.security_code_Tkvar,value=hi).pack()
 		#Button:OKボタン
 		Tk.Button(self.root,text="done",command=self.done_initial_setting).pack()	#Button:入力終了時self.done()が呼ばれる。
+
+		#Global Binds
+		def shortcut_bind(event):
+			#ダウンロードモード設定のショートカット
+			if event.char == "l" :
+				self.download_mode_Tkvar.set(DOWNLOAD_MODE_LOCAL)
+			elif event.char == "a" :
+				self.download_mode_Tkvar.set(DOWNLOAD_MODE_AUTO)
+			elif event.char == "d" :
+				self.download_mode_Tkvar.set(DOWNLOAD_MODE_DIFF)
+			elif event.char == "s" :
+				self.download_mode_Tkvar.set(DOWNLOAD_MODE_DOWNLOAD)
+			#足期間設定のショートカット
+			if event.char == "D" :
+				self.term_for_a_bar_Tkvar.set(TERM_DICT["日足"])
+			elif event.char == "W" :
+				self.term_for_a_bar_Tkvar.set(TERM_DICT["週足"])
+			elif event.char == "H" :
+				self.term_for_a_bar_Tkvar.set(TERM_DICT["前場後場"])
+			elif event.char == "M" :
+				self.term_for_a_bar_Tkvar.set(TERM_DICT["5分足"])
+		for char in tuple("ladsDWHM") :
+			self.root.bind("<%s>" % (char),shortcut_bind)
+
 		#Tk main_loop
 		self.root.mainloop()
 
@@ -2456,7 +2639,9 @@ class Setting_Tk_Dialog(object):
 				term_button.set_state(True)
 				buttons_for_term.draw()
 
-				self.root.destroy()	#Tkルートウィンドウを破棄
+				self.close_window()	#Tkルートウィンドウを破棄
+				#履歴の書き込み
+				self.write_history(security_code)
 			else :
 				print "データのダウンロードに失敗しました"
 		else :
@@ -2482,6 +2667,7 @@ def add_default_buttons(root):
 	button_informations = []	#(id_str,bind_function,swiching,synchro_func)の情報を格納する一時変数
 	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True,synchronize_Y_axis_fix) )
 	button_informations.append( ("RulerDefault",pressed_set_ruler_default,False,None) )
+	button_informations.append( ("RulerMiddle",pressed_set_middle_ruler_center,False,None) )
 	button_informations.append( ("AA-line",pressed_AA_button,True,synchronize_AA) )
 	#登録
 	for id_str , bind_function , swiching , synchro_func in button_informations :
@@ -2556,7 +2742,18 @@ def pressed_set_ruler_default(button):
 	"""
 	root = button.get_parent_box().get_father()
 	focused_box = root.get_focused_box()
-	focused_box.get_content().set_default_horizontal_rulers()
+	focused_box.get_content().set_horizontal_rulers_prices_default()
+	focused_box.draw()
+	return True
+
+def pressed_set_middle_ruler_center(button):
+	"""
+	フォーカスチャートの水平ルーラーのうち、中間のルーラーとして定義されたオブジェクトの価格状態を、
+	高値として定義されたそれと安値のそれとして定義されたそれの中間値に再設定する。
+	"""
+	root = button.get_parent_box().get_father()
+	focused_box = root.get_focused_box()
+	focused_box.get_content().set_middle_horizontal_rulers_price_center()
 	focused_box.draw()
 	return True
 
