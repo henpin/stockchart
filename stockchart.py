@@ -69,6 +69,9 @@ DEFAULT_MA_DAYS_WEEEKLY = f( ((3,False),(5,False),(25,False),(75,False)) )
 DEFAULT_MA_DAYS_MINUTELY = f( ((3,False),(5,False),(25,False)) )
 #Optional
 DEBUG_MODE = 0
+#Chart Color
+Actual_Account_Color = (255,100,50)
+Middle_Price_Color = (0,0,0)
 
 
 #Class-----
@@ -341,13 +344,13 @@ class Root_Container():
 			if event.type == pygame.QUIT or self.keys[pygame.K_ESCAPE] :
 				self.looping = False	#停止。
 			elif event.type == pygame.MOUSEBUTTONDOWN :
-				self.fps = 30	#滑らかに動かす
+				self.fps = 20	#滑らかに動かす
 				for child_box in self.child_box_list :
 					if child_box.collide_point(event.pos) :
 						child_box.process_MOUSEBUTTONDOWN(event)
 						break
 			elif event.type == pygame.MOUSEBUTTONUP :
-				self.fps = 10	#プロセッサ時間の節約
+				self.fps = 15	#プロセッサ時間の節約
 			elif event.type == pygame.VIDEORESIZE :
 				self.screen = pygame.display.set_mode(event.size,pygame.VIDEORESIZE)
 				self.set_child_box_area()
@@ -707,12 +710,12 @@ class UI_Button(Content_of_ButtonBox):
 		self._left_top , _width , _height= (0,0) , 0 , 0
 		self.synchronize_with_focuse_content = None	#ボタンstate同期用の関数。self.set_synchro_function()で設定する。
 
-	def draw(self,target_surface,left_top,font):
+	def draw(self,target_surface,left_top,font,button_color=None):
 		"""
 		このメソッドの呼び出し元、すなわち、Button_Boxオブジェクトから提供される描画領域としてのサーフェスにボタンを描画する。
 		また、この際決定されるボタンサイズ、親Button_Boxオブジェクトにおける座標位置、についての情報をset_zize()により納する。
 		"""
-		button_color =  (255,0,0) if self.state else (255,255,255)
+		button_color = button_color or ( (255,0,0) if self.state else (255,255,255) )
 		surface = font.render(self.string,True,(0,0,0),button_color)
 		pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
 		target_surface.blit(surface,left_top)
@@ -775,6 +778,85 @@ class No_Swith_Button(UI_Button):
 		このオブジェクトは状態を持たないので、ただ、ボタンが押された時には、規定のバインド関数を実行します。それ以上は何もしません。
 		"""
 		self.command(self)
+
+
+class Toggle_Button(UI_Button):
+	"""
+	このボタンオブジェクトは、３つ以上の"状態"を持つボタンで、UI_Buttonを継承する。
+	つまるところ、それに３つ以上の状態の概念をデコレイトするクラスである。
+
+	このオブジェクトは３つ以上の「状態」を「状態のリスト」のそのindex値としてself.stateに格納する。
+	「状態のリスト」とは、「状態を表す文字列のリスト」であって、これによってボタンプレスドコマンド関数は、今すべき処理を確定せしめるだろう。
+	また、「状態（を表す文字列）」とは、実際にボタン上に表示される文字列でもある。
+	実際の状態の変化に基づく、このオブジェクト内におけるデータの変化については、やはりこのオブジェクトのメソッドが請け負う。
+	"""
+	def __init__(self,states,id_str,command):
+		"""
+		"""
+		if not isinstance(states,(list,tuple)) :
+			raise Exception("引数が不正です。")
+		elif len(states) <= 2 :
+			raise Exception("リストメンバ数が不十分です。")
+
+		self.states = states
+		initial_string = states[0]
+		UI_Button.__init__(self,initial_string,id_str,command)
+		self.initialize_state()		#「状態」初期化処理。フォーカスオブジェクトの状態も同期させる。
+
+	def call_synchro_function(self):
+		"""
+		定義されていれば、シンクロ関数をコールする。
+		シンクロ関数が未定義ならば、チャートオブジェクトは複雑な「状態」について関知しない（予定）なので状態を初期化しちゃう。
+		"""
+		if self.synchronize_with_focuse_content :
+			self.synchronize_with_focuse_content(self)
+		else :
+			self.initialize_state()
+		return True
+
+	def initialize_state(self):
+		"""
+		「状態」情報を完全に初期化する。
+		また、フォーカスのあるチャートオブジェクトの状態もこの状態に同期する為にcommandを手放しで呼ぶ。
+		"""
+		self.state = 0
+		self.string = self.states[0]
+		self.command(self)
+
+	def get_state_str(self,index=None):
+		"""
+		引数に与えられたindex値としてのstate値の表現する「状態」を、表現する文字列を返す。
+		なお、index値は省略可能で、その時には、現在の「状態」を表す文字列を返す。
+		"""
+		if index != None and 0 <= index < len(self.states) :
+			return self.states[index]
+		else :
+			return self.states[self.state]
+
+	def get_next_state(self):
+		"""
+		次の「状態」のstate値を返す。
+		"""
+		next_state = self.state + 1
+		if next_state > len(self.states)-1 :
+			next_state = 0
+		return next_state
+
+	def switch_state(self):
+		"""
+		このボタンの「状態」を変える。即ち、
+		1,内部的な状態を格納するself.state属性値を変更する。
+		2,ボタンの説明文字列self.string属性値を変更する。
+		"""
+		self.set_state( self.get_next_state() )
+		self.string = self.get_state_str()	#「状態」を表すボタン上の文字列の更新
+
+	def draw(self,target_surface,left_top,font,button_color=None):
+		"""
+		UIボタンクラスのdrawメソッドは、状態により色を勝手に変更してしまうので、これを明示的に宣言する必要がある。
+		"""
+		color = (255,255,0)
+		UI_Button.draw(self,target_surface,left_top,font,button_color=color)
 
 
 class Tab(object):
@@ -890,14 +972,15 @@ class Chart_Analyser(object):
 
 class Price_Converter(Chart_Analyser):
 	"""
-	「価格データの系列を用いて、そのデータを均衡化したようなデータの系列を一意に算出する」ような機能の実装されたすべてのクラスの基底クラス。
-	このクラスを継承するすべてのクラスは、Stock_Chartオブジェクトに関係づけられることを前提としています。
-	このクラスの子クラスのオブジェクトは、calc()の呼び出しによってそのデータの算出を行い、draw()によってそのデータをグラフィカルに表現します。
-	このクラスの子クラスのオブジェクトの有するデータ情報の実態であるlistオブジェクト(実際には効率化のためタプルに変換して格納される)は、親Stock_Chartオブジェクトの有する、価格データの実態たるstock_price_listと完全に対応したデータを格納している。
+	あるStockChartオブジェクトに格納されたデータを変換、静的に保持する為のオブジェクト。なお、そのデータの描画も担当する。
+	この子クラスのオブジェクトは、calc()の呼び出しによってそのデータの算出を行い、draw()によってそのデータをグラフィカルに表現します。
+	このクラスを継承するクラスのオブジェクトの有するデータ情報の実態であるlistオブジェクト(実際には効率化のためタプルに変換して格納される)は、親Stock_Chartオブジェクトの有する、価格データの実態たるstock_price_listと完全に対応したデータを格納している。
 	即ち、ある値indexにおいてstock_price_list[index]の値は、このクラスのインスタンスのもつデータリストのlist[index]の値と完全に関連づいている
 	なお、このデータリストにおいて、「無効な値」はint値「0」として定義され、格納されている。
+
+	このオブジェクトは、属性値として、visibilityを、統一的なデータアクセス用のインターフェイスとしてget_datalist,あるいはget_valueを、有する。
 	"""
-	def __init__(self,parent,color,visible):
+	def __init__(self,parent,color,visible,plot_visible=False,line_visible=True):
 		"""
 		親Stock_Chartオブジェクト、描画に用いるRGB値、可視不可視についての設定。
 		"""
@@ -906,23 +989,47 @@ class Price_Converter(Chart_Analyser):
 		self.parent = parent	#親のStock_Chartオブジェクト
 		self.color = color 
 		self.visible = visible
+		self.plot_visible = plot_visible
+		self.line_visible = line_visible
 
+	def get_parent(self):
+		return self.parent
+
+	#オブジェクト全体の可視設定
 	def set_visible(self,visible=True):
 		self.visible = visible
 
-	def set_imvisible(self):
+	def set_invisible(self):
 		self.visible = False
 
 	def is_visible(self):
 		return self.visible
+
+	#プロットポイントについての可視設定
+	def set_plot_visible(self,visible=True):
+		self.plot_visible = visible
+
+	def set_plot_invisible(self):
+		self.plot_visible = False
+
+	#線についての可視設定
+	def set_line_visible(self,visible=True):
+		self.line_visible = visible
+
+	def set_line_invisible(self):
+		self.line_visible = False
+
+	def get_datalist(self):
+		raise Exception("オーバーライドされていません")
 
 	def get_value(self,index):
 		"""
 		すべての子クラスが実装すべきインターフェイス。
 		引数に渡されたindex値に対する価格データ値、valueを返す。
 		このindex値は親Stock_Chartオブジェクトの有するstock_price_listにおけるindex値に完全に対応する。
+		なお、無効な値は「０」として定義されている。
 		"""
-		return self.datalist[index]	#変数名の関係でオーバーライドはご自由に
+		return self.get_datalist()[index]
 	
 	def calc(self):
 		"""
@@ -935,9 +1042,30 @@ class Price_Converter(Chart_Analyser):
 	def draw_to_surface(self,surface):
 		"""
 		self.calc()によって算出、格納された価格データ情報に基づいて、与えられたサーフェスに描画するメソッド。
-		データリストのインターフェイスが同じなので描画関数は共有できる。
 		"""
-		raise Exception("変数名を絶対実装すべきインターフェイスとして定義するわけにもいかんのでOverrideしてください。")
+		start , end = self.parent.get_drawing_index()
+		datalist = self.get_datalist()
+		parent = self.get_parent()
+		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
+		f = ( lambda  index,price : ( parent.get_index2pos_x(index) , int(round(parent.price_to_height(price))) ) )
+		point_list = [ f(index,datalist[index]) for index in range(start,end+1) if datalist[index] ]
+		#プロットポイントの描画
+		if self.plot_visible :
+			self.draw_point_to_surface(surface,point_list)
+		#線の描画
+		if self.line_visible :
+			pygame.draw.aalines(surface,self.color,False,point_list)
+
+	def draw_point_to_surface(self,surface,point_list):
+		"""
+		与えられたサーフェスに価格データをプロットする。
+		ただし、価格データの座標値への変換については、親関数であるdraw関数による。
+		即ち、すでに変換された座標値のリストを引数に取る。
+		"""
+		candle_width , Nouse = self.get_parent().get_drawing_size()
+		point_size = int( float ( candle_width / 2 ) )
+		for point in point_list :
+			pygame.draw.circle(surface,self.color,point,point_size)
 
 
 class Moving_Average(Price_Converter):
@@ -946,6 +1074,7 @@ class Moving_Average(Price_Converter):
 	"""
 	def __init__(self,parent,days,price_type,color,visible=True):
 		"""
+		Price_Converterデフォルトの引数であるparent,colorの他に、移動平均算出のための属性値ー移動平均日数days,算出に用いる価格型price_typeを引数に取る。
 		"""
 		Price_Converter.__init__(self,parent,color,visible)
 		self.days = days	#移動平均日数
@@ -961,19 +1090,16 @@ class Moving_Average(Price_Converter):
 		"""
 		return self.days
 
-	def get_value(self,index):
-		"""
-		引数indexで定義される移動平均値を返す。indexの値は親Stock_Chartオブジェクトのprice_listにおけるindex値と同期されている。
-		ただし、無効な値としてそれが定義されていたとき、仮の値として0を返す。
-		"""
-		return self.MAlist[index]
+	def get_datalist(self):
+		return self.MAlist
 
 	def calc(self):
 		"""
 		全チャート期間における移動平均値を算出し、self.MAlistに格納する。
 		"""
 		MAlist = []	#一時変数。最後にタプル化したものをself.MAlistに格納
-		price_list = self.parent.stock_price_list
+		parent = self.get_parent()
+		price_list = parent.get_price_data()
 		target_index = self.parent.pricetype2index(self.price_type)	#定義された価格タイプを表すprice_listにおけるindex値
 		f = ( lambda x : MAlist.append(0) )	#一時関数。無効な値としてindex値に対応させておくためのユーティリティ
 		#移動平均値の算出。算出可能なのは、index値が少なくともself.days以上の時。
@@ -994,16 +1120,6 @@ class Moving_Average(Price_Converter):
 					f(0)	#無効な値として0を格納しておく。
 		self.MAlist = tuple(MAlist)
 
-	def draw_to_surface(self,surface):
-		"""
-		self.calc()によって算出、格納された価格データ情報に基づいて、与えられたサーフェスに描画するメソッド。
-		"""
-		start , end = self.parent.get_drawing_index()
-		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
-		f = ( lambda  index,price : ( self.parent.get_index2pos_x(index) , self.parent.price_to_height(price) ) )
-		point_list = [ f(index,self.MAlist[index]) for index in range(start,end+1) if self.MAlist[index] ]
-		pygame.draw.aalines(surface,self.color,False,point_list)
-
 
 class Actual_Account_Analyser(Price_Converter):
 	"""
@@ -1013,16 +1129,11 @@ class Actual_Account_Analyser(Price_Converter):
 	"""
 	def __init__(self,parent,color,visible=True):
 		Price_Converter.__init__(self,parent,color,visible)
-		if not isinstance(parent,Stock_Chart) :
-			raise Exception("親コンテンツオブジェクトが不正な型です")
 		self.AAlist = ()
 		self.least_numof_MA = 3		#実質的価値の算出に最低限３つはMAのデータがほしい
 
-	def get_value(self,index):
-		"""
-		index値に対するAAlistの値を返すインターフェイス
-		"""
-		return self.AAlist[index]
+	def get_datalist(self):
+		return self.AAlist
 	
 	def calc(self,MAlist):
 		"""
@@ -1030,7 +1141,7 @@ class Actual_Account_Analyser(Price_Converter):
 		ここで生成されるデータリストAAlistのindex値は、親Stock_Chartオブジェクトにおけるstock_price_listにおけるindex値に完全に対応する。
 		"""
 		AAlist = []
-		endindex = len(self.parent.stock_price_list)
+		endindex = len(self.get_parent().get_price_data())
 		numof_MA = len(MAlist)
 		for index in range(endindex+1) :
 			MA_values = [ MAlist[i].get_value(index) for i in range(numof_MA) if MAlist[i].get_value(index) ]
@@ -1043,15 +1154,40 @@ class Actual_Account_Analyser(Price_Converter):
 
 		self.AAlist = tuple(AAlist)	#Tuple化して登録
 
-	def draw_to_surface(self,surface):
+
+class Middle_Price_Analyser(Price_Converter):
+	"""
+	関連付けられる株価データのすべての個々の足についての、「中間価格」をそれぞれ分析するオブジェクト。
+	"""
+	def __init__(self,parent,color,visible=True):
+		Price_Converter.__init__(self,parent,color,visible,plot_visible=True,line_visible=False)
+		self.MPlist = ()
+
+	def get_datalist(self):
+		return self.MPlist
+
+	def calc(self):
 		"""
-		self.calc()によって算出、格納された価格データ情報に基づいて、与えられたサーフェスに描画するメソッド。
+		中間価格の算出、格納を行うメソッド。
 		"""
-		start , end = self.parent.get_drawing_index()
-		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
-		f = ( lambda  index,price : ( self.parent.get_index2pos_x(index) , self.parent.price_to_height(price) ) )
-		point_list = [ f(index,self.AAlist[index]) for index in range(start,end+1) if self.AAlist[index] ]
-		pygame.draw.aalines(surface,self.color,False,point_list)
+		MPlist = []
+		parent = self.get_parent()
+		for price_ls in parent.get_price_data() :
+			opning , closing = parent.get_opning_closing_price(price_ls)
+			high , low , Nouse = parent.get_price_range(price_ls)
+			#無効な値の検出。
+			if [ price for price in price_ls if not price ] :
+				middle_price = 0
+			else :
+				#陽足なら
+				if closing >= opning :
+					middle_price = ( high + opning ) / 2 
+				#陰足ならば
+				elif opning >= closing :
+					middle_price = ( opning + low ) / 2
+			MPlist.append(middle_price)
+
+		self.MPlist = tuple(MPlist)
 
 
 class Stock_Chart(Content):
@@ -1156,9 +1292,8 @@ class Stock_Chart(Content):
 			#データのフェッチに失敗すればFalseを返す
 			if not self.download_price_data() :
 				return False
-		#チャート上オシレーターの初期化
-		self.set_default_moving_averages()
-		self.set_AA_analyser()
+		#価格コンバータの初期化
+		self.set_default_analysers()
 		return True
 
 	def get_moving_averages(self):
@@ -1621,10 +1756,10 @@ class Stock_Chart(Content):
 
 		#ローソク足の描画
 		surface_drawn_candle = self.draw_candle(surface_size)
-		#移動平均線の描画
+		#価格コンバータの描画
 		surface_drawn_moving_average = self.draw_moving_average(surface_size)
-		#実質的価値表現線の描画
 		surface_drawn_actual_account = self.draw_actual_account(surface_size)
+		surface_drawn_middle_price = self.draw_middle_price(surface_size)
 		#出来高の描画
 		surface_drawn_turnover = self.draw_turnover(surface_size,font)
 		#座標の線などその他要素の描画
@@ -1647,6 +1782,7 @@ class Stock_Chart(Content):
 		surface.blit(surface_drawn_candle,(0,0))
 		surface.blit(surface_drawn_moving_average,(0,0))
 		surface.blit(surface_drawn_actual_account,(0,0))
+		surface.blit(surface_drawn_middle_price,(0,0))
 
 	def get_drawing_size(self):
 		"""
@@ -1713,6 +1849,14 @@ class Stock_Chart(Content):
 		surface = pygame.transform.flip(surface,False,True)
 		return surface
 
+	def set_default_analysers(self):
+		"""
+		アナライザーオブジェクトの設定に関する中間インターフェイスメソッド。
+		"""
+		self.set_default_moving_averages()
+		self.set_AA_analyser()
+		self.set_MP_analyser()
+
 	def set_default_moving_averages(self):
 		"""
 		デフォルトの移動平均線の登録を行う
@@ -1727,7 +1871,7 @@ class Stock_Chart(Content):
 		for day,color,visible in ma_days :
 			MA = Moving_Average(self,day,"C",color)
 			if not visible :
-				MA.set_imvisible()
+				MA.set_invisible()
 			self.moving_averages.append(MA)
 
 	def draw_moving_average(self,surface_size):
@@ -1745,7 +1889,7 @@ class Stock_Chart(Content):
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
 		return flipped_surface
 
-	def set_AA_analyser(self) :
+	def set_AA_analyser(self):
 		"""
 		実質的価値の分析を担当するActual_Account_Analyserクラスを生成し、このオブジェクトに登録する。
 		また、このメソッド内でActual_Account_Analyserのcalc()を呼び出し、実質的価値を表す株価の算出もすます。
@@ -1755,18 +1899,35 @@ class Stock_Chart(Content):
 				"\n実質的価値の算出を中止します。"
 			return False
 
-		color = (255,100,50)
+		color = Actual_Account_Color
 		AA_analyser = Actual_Account_Analyser(self,color)
 		AA_analyser.calc(self.moving_averages)
 		self.AA_analyser = AA_analyser
 
 	def draw_actual_account(self,surface_size):
+		return self.draw_analysed_price(surface_size,self.AA_analyser)
+
+	def set_MP_analyser(self):
 		"""
+		「中間値」の算出を担当するMiddle_Price_Analyserオブジェクトを生成し、このオブジェクトに登録する。
+		また、calcメソッドも明示的に呼び出し、その実際の算出、格納も済ます。
+		"""
+		color = Middle_Price_Color
+		MP_analyser = Middle_Price_Analyser(self,color)
+		MP_analyser.calc()
+		self.MP_analyser = MP_analyser
+
+	def draw_middle_price(self,surface_size):
+		return self.draw_analysed_price(surface_size,self.MP_analyser)
+
+	def draw_analysed_price(self,surface_size,analyser):
+		"""
+		価格コンバータの描画のための共通インターフェイス。
 		"""
 		surface = self.get_surface(surface_size)
-		if self.AA_analyser.is_visible() :
-			self.AA_analyser.draw_to_surface(surface)
 
+		if analyser.is_visible() :
+			analyser.draw_to_surface(surface)
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
 		return flipped_surface
 
@@ -2664,11 +2825,12 @@ def add_default_buttons(root):
 	#チャートについての詳細設定
 	button_box = Button_Box(root,"buttons_for_chart_setting",bgcolor=(200,255,200))
 	button_box.add_button(Label_of_ButtonBox("チャート設定"))
-	button_informations = []	#(id_str,bind_function,swiching,synchro_func)の情報を格納する一時変数
-	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True,synchronize_Y_axis_fix) )
-	button_informations.append( ("RulerDefault",pressed_set_ruler_default,False,None) )
-	button_informations.append( ("RulerMiddle",pressed_set_middle_ruler_center,False,None) )
-	button_informations.append( ("AA-line",pressed_AA_button,True,synchronize_AA) )
+	button_informations = [
+	 	 ("Y-Prefix",pressed_Y_axis_fix_button,True,synchronize_Y_axis_fix),
+	 	 ("RulerDefault",pressed_set_ruler_default,False,None),
+	 	 ("RulerMiddle",pressed_set_middle_ruler_center,False,None), 
+	 	 ("AA-line",pressed_AA_button,True,synchronize_AA), 
+	 	 ]#(id_str,bind_function,swiching,synchro_func)の情報を格納する一時変数
 	#登録
 	for id_str , bind_function , swiching , synchro_func in button_informations :
 		if swiching :
@@ -2678,12 +2840,24 @@ def add_default_buttons(root):
 		else:
 			button = No_Swith_Button(" "+id_str+" ",id_str,bind_function)
 		button_box.add_button(button)
+
 	#移動平均線についてのショートカット
 	for MA_day in DEFAULT_MA_DAYS_ALL :
 		id_str = "MA-%d" % (MA_day)
 		label_str = "MA-%d" % (MA_day)
 		button = UI_Button(label_str,id_str,pressed_MA_setting_shortcut)
 		button.set_synchro_function(synchronize_MA)
+		button_box.add_button(button)
+
+	#Toggle Buttonの登録
+	button_informations = [
+		( ("first","second","therd"),"MP-Button",pressed_MP_button,None ) 
+		]	#(states,id_str,bind_func,synchro_func)
+	#登録
+	for states , id_str , bind_function , synchro_func in button_informations :
+		button = Toggle_Button(states,id_str,bind_function)
+		if synchro_func :
+			button.set_synchro_function(synchro_func)
 		button_box.add_button(button)
 
 	root.add_box(button_box)
@@ -2783,6 +2957,13 @@ def pressed_AA_button(button):
 
 	focused_content.get_AA_analyser().set_visible(not button.state)
 	focused_box.draw()
+	return True
+
+def pressed_MP_button(button):
+	"""
+	中間価格を表現するグラフについてのvisible状態設定
+	"""
+	print button.get_state_str(button.get_next_state())
 	return True
 
 #Synchronizing Functions : those will be call'd when focused-object is changed
