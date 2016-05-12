@@ -71,7 +71,7 @@ DEFAULT_MA_DAYS_MINUTELY = f( ((3,False),(5,False),(25,False)) )
 DEBUG_MODE = 0
 #Chart Color
 Actual_Account_Color = (255,100,50)
-Middle_Price_Color = (0,0,0)
+Middle_Price_Color = (220,148,220)
 
 
 #Class-----
@@ -186,12 +186,23 @@ class Root_Container():
 		self.child_box_list = []	#すべてのGUI要素を含むリスト
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
+		self.initialized = False	#初期化処理が完全に完了しているか否かを表すフラグ。これがFalseの時は描画不能などの制限がある。
 
 		#初期化処理
 		self.fill_background()
 		add_default_buttons(self)	#デフォルトのボタンを配置
 		add_default_labels(self)	#デフォルトラベルの配置
 		Setting_Tk_Dialog(self).initial_chart_setting()	 #設定画面の呼び出し
+		self.initialized = True		#初期化完了フラグ
+
+	def check_initialized(self,kill=False):
+		"""
+		初期化処理が完了しているか確認する
+		オプショナル引数killがTrueを取るとき、もし初期化処理が未完了なら、例外を投げる。
+		"""
+		if not self.initialized and kill :
+			raise Exception("初期化処理が完了していません")
+		return self.initialized
 	
 	def add_box(self,child):
 		"""
@@ -334,10 +345,9 @@ class Root_Container():
 		shift_mod , ctrl_mod = (pygame.K_RSHIFT in pressed_keys or pygame.K_LSHIFT in pressed_keys) , (pygame.K_RCTRL in pressed_keys or pygame.K_LCTRL in pressed_keys)
 		mod = ( shift_mod and pygame.KMOD_SHIFT ) or ( ctrl_mod and pygame.KMOD_CTRL ) or 0
 		for key in pressed_keys :
-			if key in self.keys_control_chart :
-				event = pygame.event.Event(pygame.KEYDOWN,key=key,mod=mod)	#イベントの発行
-				focused_box = self.get_focused_box()
-				focused_box.process_KEYDOWN(event)
+			event = pygame.event.Event(pygame.KEYDOWN,key=key,mod=mod)	#イベントの発行
+			focused_box = self.get_focused_box()
+			focused_box.process_KEYDOWN(event)
 
 		#イベントキュー上の処理
 		for event in pygame.event.get():
@@ -801,7 +811,6 @@ class Toggle_Button(UI_Button):
 		self.states = states
 		initial_string = states[0]
 		UI_Button.__init__(self,initial_string,id_str,command)
-		self.initialize_state()		#「状態」初期化処理。フォーカスオブジェクトの状態も同期させる。
 
 	def call_synchro_function(self):
 		"""
@@ -821,7 +830,7 @@ class Toggle_Button(UI_Button):
 		"""
 		self.state = 0
 		self.string = self.states[0]
-		self.command(self)
+		self.command(self,initialize=True)
 
 	def get_state_str(self,index=None):
 		"""
@@ -855,7 +864,7 @@ class Toggle_Button(UI_Button):
 		"""
 		UIボタンクラスのdrawメソッドは、状態により色を勝手に変更してしまうので、これを明示的に宣言する必要がある。
 		"""
-		color = (255,255,0)
+		color = (255,255,200)
 		UI_Button.draw(self,target_surface,left_top,font,button_color=color)
 
 
@@ -1308,6 +1317,12 @@ class Stock_Chart(Content):
 		"""
 		return self.AA_analyser
 
+	def get_MP_analyser(self):
+		"""
+		関連付けられた中間価格算出オブジェクトを返す
+		"""
+		return self.MP_analyser
+
 	def set_zoom_scale(self,scale=None):
 		"""
 		ズームスケールの設定を行う。
@@ -1357,6 +1372,8 @@ class Stock_Chart(Content):
 		if dummy :
 			raise Exception("引数は明示的に宣言してください")
 		if start != None :
+			if not 0 <= start <= len(self.get_price_data()) :
+				raise Exception("引数が不正です")
 			self._drawing_start_index = start
 		elif end :
 			if end >= len(self.stock_price_list) :
@@ -1378,7 +1395,7 @@ class Stock_Chart(Content):
 		"""
 		if isinstance(data,(list,tuple)) and data :
 			self.stock_price_list = tuple(data)
-			self.set_drawing_index( end =len(data) -1 )
+			self.set_drawing_index( end = len(data)-1 )
 
 	def get_price_data(self):
 		return self.stock_price_list
@@ -2410,6 +2427,24 @@ class Stock_Chart(Content):
 		self._highlight_index = index
 		self.print_highlight_price_information()
 
+	def set_highlight_center(self):
+		"""
+		現在のハイライトインデックスを"中心"として、「描画インデックス」を、再定義する。
+		"""
+		center_index = self.get_highlight_index()
+		drawing_start , drawing_end = self.get_drawing_index()
+		num_of_candle = drawing_end - drawing_start
+
+		moving_val = (( center_index - drawing_start ) - ( drawing_end - center_index )) / 2
+		drawing_end += moving_val
+		end_max = len(self.get_price_data())
+		if drawing_end >= end_max :
+			drawing_end = end_max
+		elif drawing_end - num_of_candle <= 0 :
+			drawing_end = num_of_candle + 1
+
+		self.set_drawing_index(end=drawing_end)
+
 	def get_highlight_index(self):
 		"""
 		定義されたハイライト表示する要素のindex値を取得するインターフェイス。
@@ -2565,6 +2600,8 @@ class Stock_Chart(Content):
 				self.zoom_up()
 			elif event.key == pygame.K_DOWN :
 				self.zoom_down()
+			elif event.key == pygame.K_c :
+				self.set_highlight_center()
 		#シフトモディファ時
 		elif event.mod == pygame.KMOD_SHIFT :
 			if event.key in LEFTS:
@@ -2825,21 +2862,28 @@ def add_default_buttons(root):
 	#チャートについての詳細設定
 	button_box = Button_Box(root,"buttons_for_chart_setting",bgcolor=(200,255,200))
 	button_box.add_button(Label_of_ButtonBox("チャート設定"))
+	TYPE_NORMAL , TYPE_NOSWITCH , TYPE_TOGGLE = range(3)
 	button_informations = [
-	 	 ("Y-Prefix",pressed_Y_axis_fix_button,True,synchronize_Y_axis_fix),
-	 	 ("RulerDefault",pressed_set_ruler_default,False,None),
-	 	 ("RulerMiddle",pressed_set_middle_ruler_center,False,None), 
-	 	 ("AA-line",pressed_AA_button,True,synchronize_AA), 
-	 	 ]#(id_str,bind_function,swiching,synchro_func)の情報を格納する一時変数
-	#登録
-	for id_str , bind_function , swiching , synchro_func in button_informations :
-		if swiching :
-			button = UI_Button(id_str,id_str,bind_function)
-			if synchro_func :
-				button.set_synchro_function(synchro_func)
-		else:
-			button = No_Swith_Button(" "+id_str+" ",id_str,bind_function)
+		( TYPE_NORMAL,"Y-Prefix",pressed_Y_axis_fix_button,synchronize_Y_axis_fix ),
+		( TYPE_NOSWITCH,"RulerDefault",pressed_set_ruler_default,None ),
+		( TYPE_NOSWITCH,"RulerMiddle",pressed_set_middle_ruler_center,None ),
+		( TYPE_NORMAL,"AA-line",pressed_AA_button,synchronize_AA ),
+		( TYPE_TOGGLE,"MP_Button",pressed_MP_button,None,("MP-OFF","MP-Plot","MP-Line","MP-All") )
+		]#(button_type,id_str,bind_func,synchro_func,States)の情報を格納する一時変数
+	#ボタンオブジェクトの生成と登録
+	def regist_box(button_type,id_str,bind_func,synchro_func,*states):
+		if button_type == TYPE_NORMAL :
+			button = UI_Button(id_str,id_str,bind_func)
+		elif button_type == TYPE_NOSWITCH :
+			button = No_Swith_Button(" "+id_str+" ",id_str,bind_func)
+		elif button_type == TYPE_TOGGLE :
+			button = Toggle_Button(states[0],id_str,bind_func)
+		if synchro_func :
+			button.set_synchro_function(synchro_func)
+		#登録
 		button_box.add_button(button)
+	#登録:副作用のある関数でマップ
+	map( (lambda attr_tuple : regist_box(*attr_tuple)) , button_informations )
 
 	#移動平均線についてのショートカット
 	for MA_day in DEFAULT_MA_DAYS_ALL :
@@ -2847,17 +2891,6 @@ def add_default_buttons(root):
 		label_str = "MA-%d" % (MA_day)
 		button = UI_Button(label_str,id_str,pressed_MA_setting_shortcut)
 		button.set_synchro_function(synchronize_MA)
-		button_box.add_button(button)
-
-	#Toggle Buttonの登録
-	button_informations = [
-		( ("first","second","therd"),"MP-Button",pressed_MP_button,None ) 
-		]	#(states,id_str,bind_func,synchro_func)
-	#登録
-	for states , id_str , bind_function , synchro_func in button_informations :
-		button = Toggle_Button(states,id_str,bind_function)
-		if synchro_func :
-			button.set_synchro_function(synchro_func)
 		button_box.add_button(button)
 
 	root.add_box(button_box)
@@ -2959,11 +2992,31 @@ def pressed_AA_button(button):
 	focused_box.draw()
 	return True
 
-def pressed_MP_button(button):
+def pressed_MP_button(button,initialize=False):
 	"""
 	中間価格を表現するグラフについてのvisible状態設定
 	"""
-	print button.get_state_str(button.get_next_state())
+	root = button.get_parent_box().get_father()
+	focused_box = root.get_focused_box()
+	focused_MP = root.get_focused_box().get_content().get_MP_analyser()
+
+	#初期化処理として呼ばれたなら、現状の状態に同期化する処理をし、さもなくば次の「状態」としてフォーカスオブジェクトを同期する
+	next_state = button.get_state_str() if initialize else button.get_state_str(button.get_next_state())
+	set_state = ( lambda visibility , plot_visible , line_visible :
+		( focused_MP.set_visible(visibility) , focused_MP.set_plot_visible(plot_visible) , focused_MP.set_line_visible(line_visible) )
+		)
+	if next_state == "MP-OFF" :
+		set_state(False,False,False)
+	elif next_state == "MP-Plot" :
+		set_state(True,True,False)
+	elif next_state == "MP-Line" :
+		set_state(True,False,True)
+	elif next_state == "MP-All" :
+		set_state(True,True,True)
+
+	#初期化処理中でもシンクロ関数として呼ばれるため
+	if root.check_initialized() :
+		focused_box.draw()
 	return True
 
 #Synchronizing Functions : those will be call'd when focused-object is changed
