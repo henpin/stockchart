@@ -971,15 +971,7 @@ class Horizontal_Ruler(object):
 			return False
 
 
-class Chart_Analyser(object):
-	"""
-	チャートアナライザー。よく決まってない。あとで実装する機能が増えてから実際の構造は考える。
-	"""
-	def __init__(self):
-		pass
-
-
-class Price_Converter(Chart_Analyser):
+class Price_Converter:
 	"""
 	あるStockChartオブジェクトに格納されたデータを変換、静的に保持する為のオブジェクト。なお、そのデータの描画も担当する。
 	この子クラスのオブジェクトは、calc()の呼び出しによってそのデータの算出を行い、draw()によってそのデータをグラフィカルに表現します。
@@ -988,8 +980,13 @@ class Price_Converter(Chart_Analyser):
 	なお、このデータリストにおいて、「無効な値」はint値「0」として定義され、格納されている。
 
 	このオブジェクトは、属性値として、visibilityを、統一的なデータアクセス用のインターフェイスとしてget_datalist,あるいはget_valueを、有する。
+
+	なお、このクラスはこのクラス単体でも用いることができる。
+	その場合、このクラスの__init__メソッドの引数にdatalistを定義するか、あるいは明示的にこのクラスのプライベートメソッドであるset_datalistを呼ぶ。
+	self.__set_datalistメソッドは、引数のデータリストを詳しく検証し、エラーチェックを行う。
+	正しいデータのセットであると判断されたら、子クラスに継承されることを前提とされたcalc,get_datalistをこのクラスで独立して使用出来るようオーバーライドする。
 	"""
-	def __init__(self,parent,color,visible,plot_visible=False,line_visible=True):
+	def __init__(self,parent,color,visible,plot_visible=False,line_visible=True,datalist=None):
 		"""
 		親Stock_Chartオブジェクト、描画に用いるRGB値、可視不可視についての設定。
 		"""
@@ -1000,6 +997,8 @@ class Price_Converter(Chart_Analyser):
 		self.visible = visible
 		self.plot_visible = plot_visible
 		self.line_visible = line_visible
+		if datalist :
+			self.__set_datalist(datalist)
 
 	def get_parent(self):
 		return self.parent
@@ -1039,7 +1038,27 @@ class Price_Converter(Chart_Analyser):
 		なお、無効な値は「０」として定義されている。
 		"""
 		return self.get_datalist()[index]
-	
+
+	def __set_datalist(self,datalist):
+		"""
+		特殊なデータ設定メソッド。
+		これにより外部から直接価格のリストをインポートして、このクラスにより提供される便利なインターフェイスメソッド群を用いることができる
+		このメソッドでは、データが適当なものかをチェックし、いくつかの子クラスの為のインターフェイスメソッドを無効にしたり、このクラス単体でそれらを利用できるように、オーバーライドする。
+		"""
+		#データの検証。
+		def throw_error(string):
+			raise Exception(string)
+		len(self.get_parent().get_price_data()) == len(datalist) or \
+			throw_error("リストの長さは親オブジェクトと同一でなくてはなりません")
+		check_int = ( lambda val : isinstance(val,int) or throw_error("与えられたデータにint値以外が含まれています") )
+		[ check_int(data) for data in datalist ]	#すべてのdataに対してcheck_int関数を通す
+
+		#データリストの格納
+		self.datalist = datalist
+		#子クラスに提供する為に定義されているメソッド郡をこのクラス単体で用いることができるようにオーバーライドする。
+		self.calc = ( lambda : throw_error("set_dataによって定義されたデータはcalcできません。") )
+		self.get_datalist = ( lambda : self.datalist )
+
 	def calc(self):
 		"""
 		すべての子クラスがオーバーライドすべきメソッド
@@ -1052,8 +1071,12 @@ class Price_Converter(Chart_Analyser):
 		"""
 		self.calc()によって算出、格納された価格データ情報に基づいて、与えられたサーフェスに描画するメソッド。
 		"""
+		if not self.is_visible() :
+			return False
 		start , end = self.parent.get_drawing_index()
 		datalist = self.get_datalist()
+		if not datalist :
+			raise Exception("データリストが未定義です。")
 		parent = self.get_parent()
 		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
 		f = ( lambda  index,price : ( parent.get_index2pos_x(index) , int(round(parent.price_to_height(price))) ) )
@@ -1197,6 +1220,30 @@ class Middle_Price_Analyser(Price_Converter):
 			MPlist.append(middle_price)
 
 		self.MPlist = tuple(MPlist)
+
+#いらないかもしれない。
+class Price_Type_Extractor(Price_Converter):
+	"""
+	定義された価格タイプ(寄り付き、終値etc..)をもつ価格値の集合を抽出、格納するオブジェクト。
+	"""
+	def __init__(self,parent,color,visible=True):
+		Price_Converter.__init__(self,parent,color,visible,plot_visible=True,line_visible=True)
+		self.datalist = ()
+
+	def get_datalist(self):
+		return self.datalist
+
+	def calc(self,price_type):
+		"""
+		価格タイプを表す文字列を引数に取り、親オブジェクトのその価格タイプを有する価格値の集合を算出、格納します。
+		"""
+		if not isinstance(price_type,str) :
+			raise TypeError("不正な引数です。")
+		parent = self.get_parent()
+		target_index = parent.pricetype2index(price_type)
+		datalist = [ price_list[target_index] for price_list in parent.get_price_data() ]
+
+		self.datalist = tuple(datalist)
 
 
 class Stock_Chart(Content):
@@ -1777,6 +1824,7 @@ class Stock_Chart(Content):
 		surface_drawn_moving_average = self.draw_moving_average(surface_size)
 		surface_drawn_actual_account = self.draw_actual_account(surface_size)
 		surface_drawn_middle_price = self.draw_middle_price(surface_size)
+		surface_drawn_price_type_extractor = self.draw_price_type_extractors(surface_size)
 		#出来高の描画
 		surface_drawn_turnover = self.draw_turnover(surface_size,font)
 		#座標の線などその他要素の描画
@@ -1800,6 +1848,7 @@ class Stock_Chart(Content):
 		surface.blit(surface_drawn_moving_average,(0,0))
 		surface.blit(surface_drawn_actual_account,(0,0))
 		surface.blit(surface_drawn_middle_price,(0,0))
+		surface.blit(surface_drawn_price_type_extractor,(0,0))
 
 	def get_drawing_size(self):
 		"""
@@ -1809,7 +1858,7 @@ class Stock_Chart(Content):
 		padding_size = int(round(zoom_scale * 4))
 		return candle_width,padding_size
 	
-	def get_surface(self,surface_size,color_key=BACKGROUND_COLOR):
+	def get_surface(self,surface_size,color_key=BACKGROUND_COLOR,alpha=0):
 		"""
 		サーフェスを得るためのユーティリティ関数。
 		チャートの描画に関しては、諸所の要素を諸所の描画メソッドにおいて描画し、そのサーフェスを持ち寄る形を取るから、透明設定が必要である
@@ -1818,6 +1867,8 @@ class Stock_Chart(Content):
 		surface = pygame.Surface(surface_size)
 		surface.set_colorkey(color_key)
 		surface.fill(color_key)
+		if alpha :
+			surface.set_alpha(alpha)
 		return surface
 
 	def set_index_posX_table(self):
@@ -1844,7 +1895,7 @@ class Stock_Chart(Content):
 		"""
 		ローソク足を描画したサーフェスを返す
 		"""
-		surface = self.get_surface(surface_size)
+		surface = self.get_surface(surface_size,alpha=200)
 		candle_width , padding_size = self.get_drawing_size()
 		zoom_scale = self.get_zoom_scale()
 		#ローソク足の描画
@@ -1873,6 +1924,7 @@ class Stock_Chart(Content):
 		self.set_default_moving_averages()
 		self.set_AA_analyser()
 		self.set_MP_analyser()
+		self.set_default_PT_extractors()
 
 	def set_default_moving_averages(self):
 		"""
@@ -1897,11 +1949,9 @@ class Stock_Chart(Content):
 		MAオブジェクトの中でself.index_posX_tableを使います。
 		"""
 		surface = self.get_surface(surface_size)
-		start_index , end_index = self.get_drawing_index()
 		#移動平均値の算出と描画
 		for MA in self.moving_averages :
-			if MA.is_visible() :
-				MA.draw_to_surface(surface)
+			MA.draw_to_surface(surface)
 
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
 		return flipped_surface
@@ -1936,6 +1986,27 @@ class Stock_Chart(Content):
 
 	def draw_middle_price(self,surface_size):
 		return self.draw_analysed_price(surface_size,self.MP_analyser)
+
+	def set_default_PT_extractors(self):
+		"""
+		定義された価格タイプを有する価格値のセットとしてのPrice_Type_Extractorオブジェクトを生成し、このオブジェクトに関連付ける。
+		"""
+		opning_color = (255,0,0)
+		closing_color = (0,0,255)
+		#call_calc:PT_extractorと価格タイプを引数にとって、calcを呼んで且つ、元のPT_extractorを返す。
+		#メソッド呼び出しをリスト内ですればその返り値にかかわらず、真が帰る。
+		call_calc = ( lambda PT_extractor , price_type : [ PT_extractor.calc(price_type) ] and PT_extractor )
+		PT_extractors = [ call_calc( Price_Type_Extractor(self,color) , price_type ) \
+			for price_type,color in (("O",opning_color),("C",closing_color)) ]
+		self.PT_extractors = tuple(PT_extractors)
+
+	def draw_price_type_extractors(self,surface_size):
+		surface = self.get_surface(surface_size)
+		for PT_extractor in self.PT_extractors :
+			PT_extractor.draw_to_surface(surface)
+
+		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
+		return flipped_surface
 
 	def draw_analysed_price(self,surface_size,analyser):
 		"""
@@ -2694,9 +2765,9 @@ class Setting_Tk_Dialog(object):
 		"""
 		履歴ファイルを読み、履歴のリストを返す。
 		"""
-		f = open(HISTORY_FILE,"r")
-		historys = [ hi for hi in f.read().split("\n") if hi.isdigit() ]
-		f.close()
+		with open(HISTORY_FILE,"r") as f :
+			historys = [ hi for hi in f.read().split("\n") if hi.isdigit() ]
+		self.historys = historys	#保存しとく
 		return historys
 
 	def write_history(self,security_code):
@@ -2785,6 +2856,7 @@ class Setting_Tk_Dialog(object):
 		Tk.Button(self.root,text="done",command=self.done_initial_setting).pack()	#Button:入力終了時self.done()が呼ばれる。
 
 		#Global Binds
+		self.index = 0
 		def shortcut_bind(event):
 			#ダウンロードモード設定のショートカット
 			if event.char == "l" :
@@ -2804,8 +2876,21 @@ class Setting_Tk_Dialog(object):
 				self.term_for_a_bar_Tkvar.set(TERM_DICT["前場後場"])
 			elif event.char == "M" :
 				self.term_for_a_bar_Tkvar.set(TERM_DICT["5分足"])
+			#履歴機能
+			elif event.keysym == "Tab" :
+				index = self.index
+				if index >= len(self.historys) :
+					index = 0
+					self.security_code_Tkvar.set("")
+				else :
+					self.security_code_Tkvar.set(self.historys[index])
+					index += 1
+				self.index = index
+			return "break"	#Tkinterのデフォルトのイベント処理をプリベンドする
+		#Set Binds
 		for char in tuple("ladsDWHM") :
 			self.root.bind("<%s>" % (char),shortcut_bind)
+		self.root.bind("<Tab>",shortcut_bind)
 
 		#Tk main_loop
 		self.root.mainloop()
