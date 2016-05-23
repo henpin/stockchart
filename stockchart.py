@@ -1227,7 +1227,7 @@ class Price_Type_Extractor(Price_Converter):
 	定義された価格タイプ(寄り付き、終値etc..)をもつ価格値の集合を抽出、格納するオブジェクト。
 	"""
 	def __init__(self,parent,color,visible=True):
-		Price_Converter.__init__(self,parent,color,visible,plot_visible=True,line_visible=True)
+		Price_Converter.__init__(self,parent,color,visible,plot_visible=False,line_visible=True)
 		self.datalist = ()
 
 	def get_datalist(self):
@@ -1419,7 +1419,7 @@ class Stock_Chart(Content):
 		if dummy :
 			raise Exception("引数は明示的に宣言してください")
 		if start != None :
-			if not 0 <= start <= len(self.get_price_data()) :
+			if not ( 0 <= start <= len(self.get_price_data()) ) :
 				raise Exception("引数が不正です")
 			self._drawing_start_index = start
 		elif end :
@@ -1991,13 +1991,14 @@ class Stock_Chart(Content):
 		"""
 		定義された価格タイプを有する価格値のセットとしてのPrice_Type_Extractorオブジェクトを生成し、このオブジェクトに関連付ける。
 		"""
-		opning_color = (255,0,0)
-		closing_color = (0,0,255)
+		opning_color = (0,0,255)
+		closing_color = (255,0,0)
+		price_types = [("O",opning_color),("C",closing_color)]
 		#call_calc:PT_extractorと価格タイプを引数にとって、calcを呼んで且つ、元のPT_extractorを返す。
 		#メソッド呼び出しをリスト内ですればその返り値にかかわらず、真が帰る。
 		call_calc = ( lambda PT_extractor , price_type : [ PT_extractor.calc(price_type) ] and PT_extractor )
 		PT_extractors = [ call_calc( Price_Type_Extractor(self,color) , price_type ) \
-			for price_type,color in (("O",opning_color),("C",closing_color)) ]
+			for price_type,color in price_types ]
 		self.PT_extractors = tuple(PT_extractors)
 
 	def draw_price_type_extractors(self,surface_size):
@@ -2935,50 +2936,62 @@ class Setting_Tk_Dialog(object):
 #Initializations : Create and Set Default UI Objects
 def add_default_buttons(root):
 	"""
+	デフォルトボタンのファクトリ関数
 	"""
-	#足期間のショートカットボタン
-	button_box = Button_Box(root,"buttons_for_term",bgcolor=(255,200,200))
-	button_box.add_button(Label_of_ButtonBox("足期間"))
-	for term in TERM_LIST :
-		button = UI_Button(term,TERM_DICT[term],pressed_term_button)
-		button_box.add_button(button)
-	root.add_box(button_box)
+	def Create_term_shotcut_buttons():
+		"""ある足期間のチャートを生成するショートカットボタンのファクトリ"""
+		#足期間のショートカットボタン
+		button_box = Button_Box(root,"buttons_for_term",bgcolor=(255,200,200))
+		button_box.add_button(Label_of_ButtonBox("足期間"))
+		for term in TERM_LIST :
+			button = UI_Button(term,TERM_DICT[term],pressed_term_button)
+			button_box.add_button(button)
+		root.add_box(button_box)
 
-	#チャートについての詳細設定
-	button_box = Button_Box(root,"buttons_for_chart_setting",bgcolor=(200,255,200))
-	button_box.add_button(Label_of_ButtonBox("チャート設定"))
-	TYPE_NORMAL , TYPE_NOSWITCH , TYPE_TOGGLE = range(3)
-	button_informations = [
-		( TYPE_NORMAL,"Y-Prefix",pressed_Y_axis_fix_button,synchronize_Y_axis_fix ),
-		( TYPE_NOSWITCH,"RulerDefault",pressed_set_ruler_default,None ),
-		( TYPE_NOSWITCH,"RulerMiddle",pressed_set_middle_ruler_center,None ),
-		( TYPE_NORMAL,"AA-line",pressed_AA_button,synchronize_AA ),
-		( TYPE_TOGGLE,"MP_Button",pressed_MP_button,None,("MP-OFF","MP-Plot","MP-Line","MP-All") )
-		]#(button_type,id_str,bind_func,synchro_func,States)の情報を格納する一時変数
-	#ボタンオブジェクトの生成と登録
-	def regist_box(button_type,id_str,bind_func,synchro_func,*states):
-		if button_type == TYPE_NORMAL :
-			button = UI_Button(id_str,id_str,bind_func)
-		elif button_type == TYPE_NOSWITCH :
-			button = No_Swith_Button(" "+id_str+" ",id_str,bind_func)
-		elif button_type == TYPE_TOGGLE :
-			button = Toggle_Button(states[0],id_str,bind_func)
-		if synchro_func :
-			button.set_synchro_function(synchro_func)
-		#登録
-		button_box.add_button(button)
-	#登録:副作用のある関数でマップ
-	map( (lambda attr_tuple : regist_box(*attr_tuple)) , button_informations )
+	def Create_chart_setting_buttons():
+		"""フォーカスのあるチャートについての詳細設定に関するショートカットボタン"""
 
-	#移動平均線についてのショートカット
-	for MA_day in DEFAULT_MA_DAYS_ALL :
-		id_str = "MA-%d" % (MA_day)
-		label_str = "MA-%d" % (MA_day)
-		button = UI_Button(label_str,id_str,pressed_MA_setting_shortcut)
-		button.set_synchro_function(synchronize_MA)
-		button_box.add_button(button)
+		#チャート設定用のボタンボックスの設定
+		button_box = Button_Box(root,"buttons_for_chart_setting",bgcolor=(200,255,200))
+		button_box.add_button(Label_of_ButtonBox("チャート設定"))
 
-	root.add_box(button_box)
+		#ボタンの生成と登録
+		TYPE_NORMAL , TYPE_NOSWITCH , TYPE_TOGGLE = range(3)	#ボタンタイプ
+		def regist_box(button_type,id_str,bind_func,synchro_func,*states):
+			"""ボタンの登録を行うユーティリティ一時関数"""
+			if button_type == TYPE_NORMAL :
+				button = UI_Button(id_str,id_str,bind_func)
+			elif button_type == TYPE_NOSWITCH :
+				button = No_Swith_Button(" "+id_str+" ",id_str,bind_func)
+			elif button_type == TYPE_TOGGLE :
+				button = Toggle_Button(states[0],id_str,bind_func)
+			if synchro_func :
+				button.set_synchro_function(synchro_func)
+			#登録
+			button_box.add_button(button)
+		#ボタンの定義
+		button_informations = [
+			( TYPE_NORMAL,"Y-Prefix",pressed_Y_axis_fix_button,synchronize_Y_axis_fix ),
+			( TYPE_NOSWITCH,"RulerDefault",pressed_set_ruler_default,None ),
+			( TYPE_NOSWITCH,"RulerMiddle",pressed_set_middle_ruler_center,None ),
+			( TYPE_NORMAL,"AA-line",pressed_AA_button,synchronize_AA ),
+			( TYPE_TOGGLE,"MP_Button",pressed_MP_button,None,("MP-OFF","MP-Plot","MP-Line","MP-All") )
+			]#(button_type,id_str,bind_func,synchro_func,States)の情報を格納する一時変数
+		#登録:副作用のある関数でマッピング
+		[ regist_box(*attr_tuple) for attr_tuple in button_informations ]
+
+		#移動平均線についてのショートカット
+		for MA_day in DEFAULT_MA_DAYS_ALL :
+			id_str = "MA-%d" % (MA_day)
+			label_str = "MA-%d" % (MA_day)
+			button = UI_Button(label_str,id_str,pressed_MA_setting_shortcut)
+			button.set_synchro_function(synchronize_MA)
+			button_box.add_button(button)
+		root.add_box(button_box)
+
+	#Do Creation
+	Create_term_shotcut_buttons()
+	Create_chart_setting_buttons()
 
 def add_default_labels(root):
 	"""
