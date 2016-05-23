@@ -187,6 +187,7 @@ class Root_Container():
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
 		self.initialized = False	#初期化処理が完全に完了しているか否かを表すフラグ。これがFalseの時は描画不能などの制限がある。
+		self.maximized = False		#このオブジェクトに関連付けられたスクリーンサーフェスが最大化されているかのフラグ
 
 		#初期化処理
 		self.fill_background()
@@ -362,15 +363,55 @@ class Root_Container():
 			elif event.type == pygame.MOUSEBUTTONUP :
 				self.fps = 15	#プロセッサ時間の節約
 			elif event.type == pygame.VIDEORESIZE :
-				self.screen = pygame.display.set_mode(event.size,pygame.VIDEORESIZE)
-				self.set_child_box_area()
-				self.draw()
+				self.resize_window(event.size)
 			elif event.type == pygame.MOUSEMOTION :
 				if event.buttons[0] :
 					for child_box in self.child_box_list :
 						if child_box.collide_point(event.pos) :
 							child_box.process_MOUSEDRAG(event)
 							break
+			elif event.type == pygame.KEYDOWN :
+				if event.key == pygame.K_F11 :
+					self.maximize_window()
+
+	def resize_window(self,*size):
+		"""
+		このオブジェクトに関連付けられている、スクリーンサーフェス(=Root_Window)をリサイズします。
+		実際には、サイズ値を引数にとり、新たなサイズのスクリーンサーフェスを生成、取得します。
+		なお、最後に描画領域の再計算と、実際の再描画を行います。
+		"""
+		#引数チェック
+		#引数が未定義なら、デフォルトサイズにリサイズ
+		if not size :
+			width , height = SCREEN_SIZE
+		#座標値がタプルとして渡された場合
+		elif isinstance(size[0],tuple) and len(size[0]) == 2 :
+			width , height = size[0]
+		#サイズ指定がタプルでなく省略形method(x,y)なら、
+		elif all( (isinstance(val,int) for val in size) ) :
+			width , height = size
+		else :
+			raise Exception("引数の座標値が不正です")
+
+		self.screen = pygame.display.set_mode((width,height),pygame.VIDEORESIZE)	#リサイズされたルートウィンドウの取得。
+		#再描画
+		self.set_child_box_area()
+		self.draw()
+
+	def maximize_window(self):
+		"""
+		スクリーンサーフェスの最大化を行います。
+		また、すでに最大化状態なら、デフォルトの大きさにサーフェスをリサイズします。
+		なお、実際には、このメソッドは、self.resize_windowへのブリッジの役割を果たします。
+		"""
+		#最大化されていない状態なら最大化
+		if not self.maximized :
+			maxsize = pygame.display.list_modes()[0]	#最大のウィンドウサイズの取得
+			self.resize_window(maxsize)
+			self.maximized = True	#フラグを立てる
+		else :
+			self.resize_window()	#引数なしの呼び出しでデフォルトサイズにリサイズ
+			self.maximized = False	#フラグを下ろす
 
 	def main_loop(self):
 		"""
@@ -808,6 +849,7 @@ class Toggle_Button(UI_Button):
 		elif len(states) <= 2 :
 			raise Exception("リストメンバ数が不十分です。")
 
+		self.state = 0	#初期状態
 		self.states = states
 		initial_string = states[0]
 		UI_Button.__init__(self,initial_string,id_str,command)
@@ -828,8 +870,7 @@ class Toggle_Button(UI_Button):
 		「状態」情報を完全に初期化する。
 		また、フォーカスのあるチャートオブジェクトの状態もこの状態に同期する為にcommandを手放しで呼ぶ。
 		"""
-		self.state = 0
-		self.string = self.states[0]
+		self.string = self.get_state_str()
 		self.command(self,initialize=True)
 
 	def get_state_str(self,index=None):
@@ -1194,6 +1235,7 @@ class Middle_Price_Analyser(Price_Converter):
 	def __init__(self,parent,color,visible=True):
 		Price_Converter.__init__(self,parent,color,visible,plot_visible=True,line_visible=False)
 		self.MPlist = ()
+		self.compensation = False	#価格補正を行うか否か
 
 	def get_datalist(self):
 		return self.MPlist
@@ -1211,12 +1253,16 @@ class Middle_Price_Analyser(Price_Converter):
 			if [ price for price in price_ls if not price ] :
 				middle_price = 0
 			else :
-				#陽足なら
-				if closing >= opning :
-					middle_price = ( high + opning ) / 2 
-				#陰足ならば
-				elif opning >= closing :
-					middle_price = ( opning + low ) / 2
+				#価格補正あり
+				if self.compensation :
+					#陽足なら
+					if closing >= opning :
+						middle_price = ( high + opning ) / 2
+					#陰足ならば
+					elif opning >= closing :
+						middle_price = ( opning + low ) / 2
+				else :
+					middle_price = ( opning + closing ) / 2
 			MPlist.append(middle_price)
 
 		self.MPlist = tuple(MPlist)
@@ -2658,7 +2704,7 @@ class Stock_Chart(Content):
 	def process_KEYDOWN(self,event):
 		"""
 		キーバインドについての定義を行う。
-		hj:左、kl:右。SHIFT時:チャート移動。Ctrl+jk:サイズ変更
+		hj:左、kl:右。SHIFT+hl:チャート移動。SHIFT+jk:サイズ変更
 		"""
 		LEFTS = ( pygame.K_LEFT , pygame.K_h , pygame.K_j )
 		RIGHTS = ( pygame.K_RIGHT , pygame.K_l ,pygame.K_k )
@@ -2676,16 +2722,17 @@ class Stock_Chart(Content):
 				self.set_highlight_center()
 		#シフトモディファ時
 		elif event.mod == pygame.KMOD_SHIFT :
-			if event.key in LEFTS:
+			if event.key == pygame.K_h:
 				self.move_drawing_index(-10)
-			elif event.key in RIGHTS :
+			elif event.key == pygame.K_l :
 				self.move_drawing_index(+10)
+			elif event.key == pygame.K_j :
+				self.zoom_down()
+			elif event.key == pygame.K_k :
+				self.zoom_up()
 		#コントロールモディファ時
 		elif event.mod == pygame.KMOD_CTRL :
-			if event.key in ( pygame.K_UP , pygame.K_k ):
-				self.zoom_up()
-			elif event.key in ( pygame.K_DOWN , pygame.K_j ):
-				self.zoom_down()
+			pass
 
 
 class Get_Url_Parser(HTMLParser):
@@ -2774,16 +2821,17 @@ class Setting_Tk_Dialog(object):
 	def write_history(self,security_code):
 		"""
 		証券コードを引数に取り、履歴ファイルに書く。
+		履歴は降順に書き込んでいく。つまり、最新の履歴は一番初めに書き込む。
 		"""
 		if not isinstance(security_code,int) and not str(security_code).isdigit() :
 			raise Exception("引数が不正です")
 		historys = self.load_history()
 		f = open(HISTORY_FILE,"w")
 
+		f.write("%s\n" % security_code)
 		for hi in historys :
 			if hi != security_code :
 				f.write(hi+'\n')
-		f.write(security_code)
 		f.close()
 
 	def additional_chart_setting(self):
@@ -2887,6 +2935,8 @@ class Setting_Tk_Dialog(object):
 					self.security_code_Tkvar.set(self.historys[index])
 					index += 1
 				self.index = index
+				#Tkvar.setが勝手にvalidateオプションを上書きしてしまうためconfigureで再定義
+				security_code_entry.configure(validate="key")
 			return "break"	#Tkinterのデフォルトのイベント処理をプリベンドする
 		#Set Binds
 		for char in tuple("ladsDWHM") :
@@ -2957,8 +3007,8 @@ def add_default_buttons(root):
 
 		#ボタンの生成と登録
 		TYPE_NORMAL , TYPE_NOSWITCH , TYPE_TOGGLE = range(3)	#ボタンタイプ
+		#ボタンの登録を行うユーティリティ一時関数
 		def regist_box(button_type,id_str,bind_func,synchro_func,*states):
-			"""ボタンの登録を行うユーティリティ一時関数"""
 			if button_type == TYPE_NORMAL :
 				button = UI_Button(id_str,id_str,bind_func)
 			elif button_type == TYPE_NOSWITCH :
@@ -3112,9 +3162,11 @@ def pressed_MP_button(button,initialize=False):
 	elif next_state == "MP-All" :
 		set_state(True,True,True)
 
-	#初期化処理中でもシンクロ関数として呼ばれるため
-	if root.check_initialized() :
+	#初期化処理以外ー即ち純粋なボタンプレスイベントに対してのみ「明示的に」再描画
+	#この関数がシンクロ関数として呼ばれた時(<=>initialize=True)、別の部分で必ず描画関数が呼ばれる。
+	if not initialize :
 		focused_box.draw()
+
 	return True
 
 #Synchronizing Functions : those will be call'd when focused-object is changed
