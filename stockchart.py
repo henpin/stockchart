@@ -97,17 +97,29 @@ class BASE_BOX():
 		"""
 		return self.get_parent().get_father()
 
-	def collide_point(self,pos):
+	def collide_point(self,*pos):
 		"""
 		"""
-		x = pos[0]
-		y = pos[1]
-		my_width , my_height = self.get_size()
-		my_left_top = self.get_left_top()
-		if my_left_top[0] <= x <= my_width+my_left_top[0] and my_left_top[1]+my_height >= y >= my_left_top[1] :
+		x , y = parse_coordinate(*pos)
+		width , height = self.get_size()
+		left_top = self.get_left_top()
+		if left_top[0] <= x <= width+left_top[0] and left_top[1]+height >= y >= left_top[1] :
 			return True
 		else :
 			return False
+
+	def convert_pos_to_local(self,*abs_pos):
+		"""
+		Root絶対座標値をこのBox内における相対座標(=BOXローカル座標値)へ変換する。
+		なお、絶対座標値abs_posはこのBOXにCollideしていることを前提としている。
+
+		多重チェックによるオーバーヘッドを嫌って、あえて引数チェクを行わない
+		"""
+		abs_pos = parse_coordinate(*abs_pos)
+		left_top_onroot = self.get_left_top()
+
+		relative_pos = ( (abs_pos[0] - left_top_onroot[0]) , (abs_pos[1] - left_top_onroot[1]) )
+		return relative_pos
 
 	def get_surface(self,surface_size=None,bgcolor=BACKGROUND_COLOR):
 		"""
@@ -235,6 +247,12 @@ class Root_Container():
 			self.draw()
 			return True
 
+	def get_children(self):
+		"""
+		すべての子オブジェクトを返すインターフェイスです
+		"""
+		return self.child_box_list
+
 	def set_child_box_area(self):
 		"""
 		(すべてのこのオブジェクトの子BOXオブジェクトに)描画領域の分配を行うメソッドで、まずself.calc_childbox_heightpercentage()メソッドを呼び出し、均等な分配のための値を算出し、その値を用いて、実際の設定を行う。
@@ -356,20 +374,16 @@ class Root_Container():
 				self.looping = False	#停止。
 			elif event.type == pygame.MOUSEBUTTONDOWN :
 				self.fps = 20	#滑らかに動かす
-				for child_box in self.child_box_list :
-					if child_box.collide_point(event.pos) :
-						child_box.process_MOUSEBUTTONDOWN(event)
-						break
+				self.process_MOUSEBUTTONDOWN(event)
 			elif event.type == pygame.MOUSEBUTTONUP :
 				self.fps = 15	#プロセッサ時間の節約
 			elif event.type == pygame.VIDEORESIZE :
 				self.resize_window(event.size)
 			elif event.type == pygame.MOUSEMOTION :
-				if event.buttons[0] :
-					for child_box in self.child_box_list :
-						if child_box.collide_point(event.pos) :
-							child_box.process_MOUSEDRAG(event)
-							break
+				if event.buttons[0] :	#ドラッグイベントとして補足
+					self.process_MOUSEDRAG(event)
+				else :
+					self.process_MOUSEMOTION(event)
 			elif event.type == pygame.KEYDOWN :
 				if event.key == pygame.K_F11 :
 					self.maximize_window()
@@ -384,15 +398,8 @@ class Root_Container():
 		#引数が未定義なら、デフォルトサイズにリサイズ
 		if not size :
 			width , height = SCREEN_SIZE
-		#座標値がタプルとして渡された場合
-		elif isinstance(size[0],tuple) and len(size[0]) == 2 :
-			width , height = size[0]
-		#サイズ指定がタプルでなく省略形method(x,y)なら、
-		elif all( (isinstance(val,int) for val in size) ) :
-			width , height = size
 		else :
-			raise Exception("引数の座標値が不正です")
-
+			width , height = parse_coordinate(*size)
 		self.screen = pygame.display.set_mode((width,height),pygame.VIDEORESIZE)	#リサイズされたルートウィンドウの取得。
 		#再描画
 		self.set_child_box_area()
@@ -412,6 +419,43 @@ class Root_Container():
 		else :
 			self.resize_window()	#引数なしの呼び出しでデフォルトサイズにリサイズ
 			self.maximized = False	#フラグを下ろす
+
+	def get_collide_box(self,*pos):
+		"""
+		与えられたポジション(X,Y)に対してcollide判定された子BOXオブジェクトを返す
+		いかなる子BOXオブジェクトもcollideに反応しなければ、Noneを返す。
+		"""
+		x , y = parse_coordinate(*pos)
+		for child_box in self.get_children() :
+			if child_box.collide_point((x,y)) :
+				return child_box
+		return None
+
+	def process_MOUSEMOTION(self,event):
+		"""
+		マウスモーションイベントの処理に関する最上位のインターフェイス。
+		"""
+		collide_box = self.get_collide_box(event.pos)
+		if collide_box is not None :
+			collide_box.process_MOUSEMOTION(event)
+
+	def process_MOUSEBUTTONDOWN(self,event):
+		"""
+		マウスボタンイベントの処理に関する最上位のインターフェイス。
+		詳細は子BOXに完全に委譲する
+		"""
+		collide_box = self.get_collide_box(event.pos)
+		if collide_box is not None :
+			collide_box.process_MOUSEBUTTONDOWN(event)
+
+	def process_MOUSEDRAG(self,event):
+		"""
+		マウスドラッグイベントの処理に関する最上位のインターフェイス。
+		詳細は子BOXに完全に委譲する
+		"""
+		collide_box = self.get_collide_box(event.pos)
+		if collide_box is not None :
+			collide_box.process_MOUSEDRAG(event)
 
 	def main_loop(self):
 		"""
@@ -611,6 +655,14 @@ class Button_Box(BASE_BOX):
 		self.MARGINE = 3
 		self._height = font_size[1] + self.MARGINE * 2	#規定値によってデフォルトでは、静的な高さで生成される
 		self._left_top = (0,0)	#この値はRoot_Containerオブジェクトによってのみ設定可能
+		self.need_refresh = False
+
+	def __iter__(self):
+		"""
+		このオブジェクトをイテラブルとして定義します。
+		つまり、self.get_all_buttons()の返り値であるボタンリストのイテラブル化を返します。
+		"""
+		return iter(self.get_all_buttons())
 	
 	def add_button(self,button_object):
 		if isinstance(button_object,(Content_of_ButtonBox)):
@@ -631,15 +683,29 @@ class Button_Box(BASE_BOX):
 		"""
 		return self.button_list
 
-	def draw(self):
+	def draw(self,highlight=None):
 		"""
+		このオブジェクトの格納するすべてのボタンオブジェクトのdraw()関数を呼び出し、描画させます。
+		すべての子ボタンオブジェクトはその描画にそのためのコンテキストが必要で、このメソッドはそれを引数を通して提供します。
+
+		なお、このメソッドは引数にhighlightを取り得ます。この値は子オブジェクトとして登録されているButtonオブジェクトでなければなりません
+		この定義時には、"その"オブジェクトのdraw()を呼ぶときにそのボタンをハイライト表示すべきことをやはり引数highlightで伝えます。
+		なお、その引数値の利用のいかんについては、このオブジェクトは関知しません。
 		"""
+		if ( highlight is not None ) and ( highlight not in self.get_all_buttons() ) :
+			raise TypeError("引数がこのオブジェクトの子ボタンオブジェクトでありません")
+
 		rect = self.get_rect()
 		surface = self.get_surface(bgcolor=self.bgcolor)
 		left_top = (self.MARGINE,self.MARGINE)	#細かい見た目の設定と、BOXサーフェスに対する貼り付け位置
 		#ボタンの描画
-		for button in self.button_list:
-			button.draw(surface,left_top,self.font)
+		for button in self.get_all_buttons() :
+			#ハイライト表示に関する制御
+			if highlight and highlight is button :
+				button.draw(surface,left_top,self.font,highlight=True)
+			else :
+				button.draw(surface,left_top,self.font)
+			#描画位置(左上)のシフト
 			left_top = (left_top[0]+button._width+self.MARGINE,left_top[1])
 		self.get_father().screen.blit(surface,rect)
 		pygame.display.update(rect)	
@@ -656,7 +722,21 @@ class Button_Box(BASE_BOX):
 					break
 	
 	def process_MOUSEMOTION(self,event):
-		pass
+		"""
+		on_mouseイベントに対するバインドの呼び出しを行います。
+		一般的に行われるべき処理はボタンのハイライト描画のための処理です。
+		"""
+		relative_pos = self.convert_pos_to_local(event.pos)	#BOX相対座標値へ変換
+		for button in self.get_all_buttons() :
+			if button.collide_point(relative_pos) :
+				button.process_MOUSEMOTION(event)
+				self.need_refresh = True
+				break
+		#breakされなかった時
+		else :
+			if self.need_refresh :
+				self.draw()	#リフレッシュ
+				self.need_refresh = False
 
 	def process_MOUSEDRAG(self,event):
 		pass
@@ -689,12 +769,11 @@ class Content_of_ButtonBox(Content):
 		self.string = unicode(" "+string+" ","utf-8")	#エンコードしとく
 		self.id = id_str
 	
-	def collide_point(self,pos):
+	def collide_point(self,*pos):
 		"""
 		与えられた引数pos=(x,y)の表す地点がこのクラスを継承するオブジェクトの描画範囲に衝突しているか否かについての判定をするメソッド。真偽値を返す。
 		"""
-		x = pos[0]
-		y = pos[1]
+		x , y = parse_coordinate(*pos)
 		left_top , width , height = self.get_size()
 		if left_top[0] <= x <= width+left_top[0] and left_top[1]+height >= y >= left_top[1] :
 			return True
@@ -717,6 +796,12 @@ class Content_of_ButtonBox(Content):
 		このオブジェクトに与えられた描画範囲情報についてのゲッターメソッド
 		"""
 		return self._left_top , self._width , self._height
+
+	def process_MOUSEMOTION(self,event):
+		"""
+		このメソッドは一般的なすべてのボタンオブジェクトに共通するハイライト処理に関するステートメントを定義します
+		"""
+		self.get_parent_box().draw(highlight=self)
 
 
 class Label_of_ButtonBox(Content_of_ButtonBox):
@@ -748,6 +833,12 @@ class Label_of_ButtonBox(Content_of_ButtonBox):
 		"""
 		pass
 
+	def process_MOUSEMOTION(self,event):
+		"""
+		イベント処理はなにもしない
+		"""
+		pass
+
 
 class UI_Button(Content_of_ButtonBox):
 	"""
@@ -761,14 +852,18 @@ class UI_Button(Content_of_ButtonBox):
 		self._left_top , _width , _height= (0,0) , 0 , 0
 		self.synchronize_with_focuse_content = None	#ボタンstate同期用の関数。self.set_synchro_function()で設定する。
 
-	def draw(self,target_surface,left_top,font,button_color=None):
+	def draw(self,target_surface,left_top,font,button_color=None,highlight=False):
 		"""
 		このメソッドの呼び出し元、すなわち、Button_Boxオブジェクトから提供される描画領域としてのサーフェスにボタンを描画する。
 		また、この際決定されるボタンサイズ、親Button_Boxオブジェクトにおける座標位置、についての情報をset_zize()により納する。
 		"""
 		button_color = button_color or ( (255,0,0) if self.state else (255,255,255) )
 		surface = font.render(self.string,True,(0,0,0),button_color)
-		pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
+		#枠線の描画。ハイライト表示として定義されている場合は枠線を目立つようにする
+		if highlight :
+			pygame.draw.rect(surface,(250,0,0),surface.get_rect(),3)
+		else :
+			pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
 		target_surface.blit(surface,left_top)
 		#動的に決定される描画領域についての保存。self.collideなどで用いられる。
 		w , h = surface.get_width() , surface.get_height()
@@ -901,12 +996,12 @@ class Toggle_Button(UI_Button):
 		self.set_state( self.get_next_state() )
 		self.string = self.get_state_str()	#「状態」を表すボタン上の文字列の更新
 
-	def draw(self,target_surface,left_top,font,button_color=None):
+	def draw(self,target_surface,left_top,font,button_color=None,highlight=False):
 		"""
 		UIボタンクラスのdrawメソッドは、状態により色を勝手に変更してしまうので、これを明示的に宣言する必要がある。
 		"""
 		color = (255,255,200)
-		UI_Button.draw(self,target_surface,left_top,font,button_color=color)
+		UI_Button.draw(self,target_surface,left_top,font,button_color=color,highlight=highlight)
 
 
 class Tab(object):
@@ -3231,6 +3326,42 @@ def get_human_readable(num):
 		return human_readable
 	else :
 		return no_human_readable
+
+def parse_coordinate(*coordinate,**kargs):
+	"""
+	１つのタプル、あるいは２つのint値として定義されるCoordinate値ー
+	ー即ち、座標値(x,y)、あるいはサイズ値(width,height)などをパースし、一定の形式でリターンする共通アルゴリズムとしてのユーティリティ
+
+	値が予期せぬ形式の時にはすぐに例外を送出するが、オプション引数testが定義された時には、ただNoneを返すだけにとどまる
+	"""
+	def error(message=None):
+		if test :
+			return
+		else :
+			message = message or ("引数はよきせぬ形式です : %r" % coordinate)
+			raise TypeError(message)
+
+	test = kargs.get("test",False)	#testが引数として定義されているなら例外送出を自重する
+	#長さが１以下ならば値は不正
+	if not coordinate :
+		error()
+	#座標値がタプルとして渡された場合
+	elif isinstance(coordinate[0],tuple) :
+		#レングスが２で全部intなら正常
+		if len(coordinate[0]) == 2 and all( (isinstance(val,int) for val in coordinate[0]) ) :
+			x , y = coordinate[0]
+		#アンパックし忘れの補足:冗長なエラー出力をしておく
+		elif isinstance(coordinate[0][0],tuple) :
+			error("予期せぬ引数です。この関数には値をアンパックして引数を定義してください。: %r" % coordinate)
+		else :
+			error()
+	#サイズ指定がタプルでなく省略形method(x,y)なら、
+	elif len(coordinate) == 2 and all( (isinstance(val,int) for val in coordinate) ) :
+		x , y = coordinate
+	else :
+		error()
+
+	return x,y	#純粋なタプルとして返す
 
 
 #Main Functions-----
