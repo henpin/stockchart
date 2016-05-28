@@ -69,6 +69,9 @@ DEFAULT_MA_DAYS_WEEEKLY = f( ((3,False),(5,False),(25,False),(75,False)) )
 DEFAULT_MA_DAYS_MINUTELY = f( ((3,False),(5,False),(25,False)) )
 #Optional
 DEBUG_MODE = 0
+#Chart Color
+Actual_Account_Color = (255,100,50)
+Middle_Price_Color = (220,148,220)
 
 
 #Class-----
@@ -94,17 +97,29 @@ class BASE_BOX():
 		"""
 		return self.get_parent().get_father()
 
-	def collide_point(self,pos):
+	def collide_point(self,*pos):
 		"""
 		"""
-		x = pos[0]
-		y = pos[1]
-		my_width , my_height = self.get_size()
-		my_left_top = self.get_left_top()
-		if my_left_top[0] <= x <= my_width+my_left_top[0] and my_left_top[1]+my_height >= y >= my_left_top[1] :
+		x , y = parse_coordinate(*pos)
+		width , height = self.get_size()
+		left_top = self.get_left_top()
+		if left_top[0] <= x <= width+left_top[0] and left_top[1]+height >= y >= left_top[1] :
 			return True
 		else :
 			return False
+
+	def convert_pos_to_local(self,*abs_pos):
+		"""
+		Root絶対座標値をこのBox内における相対座標(=BOXローカル座標値)へ変換する。
+		なお、絶対座標値abs_posはこのBOXにCollideしていることを前提としている。
+
+		多重チェックによるオーバーヘッドを嫌って、あえて引数チェクを行わない
+		"""
+		abs_pos = parse_coordinate(*abs_pos)
+		left_top_onroot = self.get_left_top()
+
+		relative_pos = ( (abs_pos[0] - left_top_onroot[0]) , (abs_pos[1] - left_top_onroot[1]) )
+		return relative_pos
 
 	def get_surface(self,surface_size=None,bgcolor=BACKGROUND_COLOR):
 		"""
@@ -176,19 +191,31 @@ class Root_Container():
 		#インスタンス変数
 		self.screen = pygame.display.get_surface()
 		self.background_color = BACKGROUND_COLOR
-		self.keys = pygame.key.get_pressed()	#キー入力の保存リスト、eventloop()で更新。
+		self.key_information = {}	#pygameから提供されるキーの定数と、その押され続けているフレーム数の辞書
 		self.looping = True	#メインループのスイッチ
 		self.clock = pygame.time.Clock()
 		self.fps = 10
 		self.child_box_list = []	#すべてのGUI要素を含むリスト
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
+		self.initialized = False	#初期化処理が完全に完了しているか否かを表すフラグ。これがFalseの時は描画不能などの制限がある。
+		self.maximized = False		#このオブジェクトに関連付けられたスクリーンサーフェスが最大化されているかのフラグ
 
 		#初期化処理
 		self.fill_background()
 		add_default_buttons(self)	#デフォルトのボタンを配置
 		add_default_labels(self)	#デフォルトラベルの配置
 		Setting_Tk_Dialog(self).initial_chart_setting()	 #設定画面の呼び出し
+		self.initialized = True		#初期化完了フラグを上げる
+
+	def check_initialized(self,kill=False):
+		"""
+		初期化処理が完了しているか確認する
+		オプショナル引数killがTrueを取るとき、もし初期化処理が未完了なら、例外を投げる。
+		"""
+		if not self.initialized and kill :
+			raise Exception("初期化処理が完了していません")
+		return self.initialized
 	
 	def add_box(self,child):
 		"""
@@ -219,6 +246,12 @@ class Root_Container():
 			self.set_child_box_area()
 			self.draw()
 			return True
+
+	def get_children(self):
+		"""
+		すべての子オブジェクトを返すインターフェイスです
+		"""
+		return self.child_box_list
 
 	def set_child_box_area(self):
 		"""
@@ -318,6 +351,48 @@ class Root_Container():
 		for child_box in self.child_box_list:
 			child_box.draw()
 
+	def get_key_state(self,key):
+		"""
+		キーの状態とフレームをまたいだキー状態に関する情報を得る為のインターフェイス。
+		押されていれば少なくとも0以上を返す
+		"""
+		return self.key_information.get(key,0)
+
+	def validate_keypress(self,key):
+		"""
+		引数に与えられたキーkeyについて、それに関するイベントが伝搬されるべきかどうかを判定するメソッド。
+		このメソッドは、そのキーについてのフレームをまたいでの情報を、self.key_informationから参照する。
+		なお、キーについての情報は、当然前フレームまでの情報をベースに取得するべきだから、
+		キー情報の更新メソッドself.update_key_information()は同一フレームにおいて、このメソッドより後に呼び出されなければならない。
+		"""
+		numof_frames = self.get_key_state(key)	#キーの押され続けているフレーム数
+		#消費フレーム数が1~3以内なら、それをブロックする。
+		if not numof_frames :
+			return True
+		elif 1 <= numof_frames <= 3 :
+			return False
+		elif 4 <= numof_frames :
+			return True
+
+	def update_key_information(self,pressed_keys):
+		"""
+		キー処理に関する状態を保存するためのメソッド。
+		押されたキーに対する、その押され続けているフレーム数を数える。
+
+		このメソッドはキーに関するすべてのイベント処理が終了してから呼ばれるべきである。
+		"""
+		#キーの押されているフレーム数をアップデートする
+		for key in pressed_keys :
+			if key in self.key_information :
+				self.key_information[key] += 1
+			else :
+				self.key_information[key] = 1
+
+		#フレーム検出中のキーが押されていないのならそのキーについてのフレーム情報を初期化
+		for key in [ key for key in self.key_information if self.key_information[key] ]:
+			if key not in pressed_keys :
+				self.key_information[key] = 0
+
 	def event_loop(self):
 		"""
 		イベントを補足、処理する最上層のルーチンで、イベントの処理はpygameによって提供される２つの手段を両方用います。
@@ -325,39 +400,120 @@ class Root_Container():
 		一方、マウスイベントや、その他終了、リサイズイベントの処理についてはpygame.eventに提供されるイベントキューの枠組みを用います。
 		ただし、イベントの処理に関する情報伝達インターフェイスの統一の為、「前者の枠組みにおいても」、能動的にイベントオブジェクトを発行し、これをdiispachする。
 		"""
-		#pygame.keyを用いたキーイベント処理。Eventオブジェクトを自己発行する。
-		self.keys = pygame.key.get_pressed()
-		pressed_keys = [ index for index in range(len(self.keys)) if self.keys[index] ]	#現在押されているキーのpygame定数のリスト
-		shift_mod , ctrl_mod = (pygame.K_RSHIFT in pressed_keys or pygame.K_LSHIFT in pressed_keys) , (pygame.K_RCTRL in pressed_keys or pygame.K_LCTRL in pressed_keys)
-		mod = ( shift_mod and pygame.KMOD_SHIFT ) or ( ctrl_mod and pygame.KMOD_CTRL ) or 0
-		for key in pressed_keys :
-			if key in self.keys_control_chart :
-				event = pygame.event.Event(pygame.KEYDOWN,key=key,mod=mod)	#イベントの発行
-				focused_box = self.get_focused_box()
-				focused_box.process_KEYDOWN(event)
+		def Process_event_on_keystate():
+			"""
+			pygame.keyを用いたキーイベント処理。
+			Eventオブジェクトを自己発行する。
+			また、キーの繰り返し処理に対応する為にself.validate_keypress()を、
+			キーについてのフレームをまたいだ情報を格納するためにself.update_key_information()を、それぞれこの中で呼ぶ。
+			"""
+			key_state = pygame.key.get_pressed()
+			pressed_keys = [ index for index in range(len(key_state)) if key_state[index] ]	#現在押されているキーのpygame定数のリスト
+			shift_mod , ctrl_mod = (pygame.K_RSHIFT in pressed_keys or pygame.K_LSHIFT in pressed_keys) , (pygame.K_RCTRL in pressed_keys or pygame.K_LCTRL in pressed_keys)
+			mod = ( shift_mod and pygame.KMOD_SHIFT ) or ( ctrl_mod and pygame.KMOD_CTRL ) or 0
+			for key in pressed_keys :
+				#Repeatなどの中間処理に関するキーブロックに引っかかるかどうか
+				if self.validate_keypress(key):
+					event = pygame.event.Event(pygame.KEYDOWN,key=key,mod=mod)	#イベントの発行
+					focused_box = self.get_focused_box()
+					focused_box.process_KEYDOWN(event)
+			self.update_key_information(pressed_keys)
 
-		#イベントキュー上の処理
-		for event in pygame.event.get():
-			if event.type == pygame.QUIT or self.keys[pygame.K_ESCAPE] :
-				self.looping = False	#停止。
-			elif event.type == pygame.MOUSEBUTTONDOWN :
-				self.fps = 30	#滑らかに動かす
-				for child_box in self.child_box_list :
-					if child_box.collide_point(event.pos) :
-						child_box.process_MOUSEBUTTONDOWN(event)
-						break
-			elif event.type == pygame.MOUSEBUTTONUP :
-				self.fps = 10	#プロセッサ時間の節約
-			elif event.type == pygame.VIDEORESIZE :
-				self.screen = pygame.display.set_mode(event.size,pygame.VIDEORESIZE)
-				self.set_child_box_area()
-				self.draw()
-			elif event.type == pygame.MOUSEMOTION :
-				if event.buttons[0] :
-					for child_box in self.child_box_list :
-						if child_box.collide_point(event.pos) :
-							child_box.process_MOUSEDRAG(event)
-							break
+		def Process_event_on_queue():
+			"""
+			イベントキュー上の処理。
+			pygame.eventにより提供されるイベントキューからイベントを取り出して処理する。
+			"""
+			for event in pygame.event.get():
+				if event.type == pygame.QUIT or self.get_key_state(pygame.K_ESCAPE) :
+					self.looping = False	#停止。
+				elif event.type == pygame.MOUSEBUTTONDOWN :
+					self.fps = 20	#滑らかに動かす
+					self.process_MOUSEBUTTONDOWN(event)
+				elif event.type == pygame.MOUSEBUTTONUP :
+					self.fps = 10	#プロセッサ時間の節約
+				elif event.type == pygame.VIDEORESIZE :
+					self.resize_window(event.size)
+				elif event.type == pygame.MOUSEMOTION :
+					if event.buttons[0] :	#ドラッグイベントとして補足
+						self.process_MOUSEDRAG(event)
+					else :
+						self.process_MOUSEMOTION(event)
+				elif event.type == pygame.KEYDOWN :
+					if event.key == pygame.K_F11 :
+						self.maximize_window()
+		#Do Process
+		Process_event_on_keystate()
+		Process_event_on_queue()
+
+	def resize_window(self,*size):
+		"""
+		このオブジェクトに関連付けられている、スクリーンサーフェス(=Root_Window)をリサイズします。
+		実際には、サイズ値を引数にとり、新たなサイズのスクリーンサーフェスを生成、取得します。
+		なお、最後に描画領域の再計算と、実際の再描画を行います。
+		"""
+		#引数チェック
+		#引数が未定義なら、デフォルトサイズにリサイズ
+		if not size :
+			width , height = SCREEN_SIZE
+		else :
+			width , height = parse_coordinate(*size)
+		self.screen = pygame.display.set_mode((width,height),pygame.VIDEORESIZE)	#リサイズされたルートウィンドウの取得。
+		#再描画
+		self.set_child_box_area()
+		self.draw()
+
+	def maximize_window(self):
+		"""
+		スクリーンサーフェスの最大化を行います。
+		また、すでに最大化状態なら、デフォルトの大きさにサーフェスをリサイズします。
+		なお、実際には、このメソッドは、self.resize_windowへのブリッジの役割を果たします。
+		"""
+		#最大化されていない状態なら最大化
+		if not self.maximized :
+			maxsize = pygame.display.list_modes()[0]	#最大のウィンドウサイズの取得
+			self.resize_window(maxsize)
+			self.maximized = True	#フラグを立てる
+		else :
+			self.resize_window()	#引数なしの呼び出しでデフォルトサイズにリサイズ
+			self.maximized = False	#フラグを下ろす
+
+	def get_collide_box(self,*pos):
+		"""
+		与えられたポジション(X,Y)に対してcollide判定された子BOXオブジェクトを返す
+		いかなる子BOXオブジェクトもcollideに反応しなければ、Noneを返す。
+		"""
+		x , y = parse_coordinate(*pos)
+		for child_box in self.get_children() :
+			if child_box.collide_point((x,y)) :
+				return child_box
+		return None
+
+	def process_MOUSEMOTION(self,event):
+		"""
+		マウスモーションイベントの処理に関する最上位のインターフェイス。
+		"""
+		collide_box = self.get_collide_box(event.pos)
+		if collide_box is not None :
+			collide_box.process_MOUSEMOTION(event)
+
+	def process_MOUSEBUTTONDOWN(self,event):
+		"""
+		マウスボタンイベントの処理に関する最上位のインターフェイス。
+		詳細は子BOXに完全に委譲する
+		"""
+		collide_box = self.get_collide_box(event.pos)
+		if collide_box is not None :
+			collide_box.process_MOUSEBUTTONDOWN(event)
+
+	def process_MOUSEDRAG(self,event):
+		"""
+		マウスドラッグイベントの処理に関する最上位のインターフェイス。
+		詳細は子BOXに完全に委譲する
+		"""
+		collide_box = self.get_collide_box(event.pos)
+		if collide_box is not None :
+			collide_box.process_MOUSEDRAG(event)
 
 	def main_loop(self):
 		"""
@@ -557,6 +713,14 @@ class Button_Box(BASE_BOX):
 		self.MARGINE = 3
 		self._height = font_size[1] + self.MARGINE * 2	#規定値によってデフォルトでは、静的な高さで生成される
 		self._left_top = (0,0)	#この値はRoot_Containerオブジェクトによってのみ設定可能
+		self.need_refresh = False
+
+	def __iter__(self):
+		"""
+		このオブジェクトをイテラブルとして定義します。
+		つまり、self.get_all_buttons()の返り値であるボタンリストのイテラブル化を返します。
+		"""
+		return iter(self.get_all_buttons())
 	
 	def add_button(self,button_object):
 		if isinstance(button_object,(Content_of_ButtonBox)):
@@ -577,15 +741,29 @@ class Button_Box(BASE_BOX):
 		"""
 		return self.button_list
 
-	def draw(self):
+	def draw(self,highlight=None):
 		"""
+		このオブジェクトの格納するすべてのボタンオブジェクトのdraw()関数を呼び出し、描画させます。
+		すべての子ボタンオブジェクトはその描画にそのためのコンテキストが必要で、このメソッドはそれを引数を通して提供します。
+
+		なお、このメソッドは引数にhighlightを取り得ます。この値は子オブジェクトとして登録されているButtonオブジェクトでなければなりません
+		この定義時には、"その"オブジェクトのdraw()を呼ぶときにそのボタンをハイライト表示すべきことをやはり引数highlightで伝えます。
+		なお、その引数値の利用のいかんについては、このオブジェクトは関知しません。
 		"""
+		if ( highlight is not None ) and ( highlight not in self.get_all_buttons() ) :
+			raise TypeError("引数がこのオブジェクトの子ボタンオブジェクトでありません")
+
 		rect = self.get_rect()
 		surface = self.get_surface(bgcolor=self.bgcolor)
 		left_top = (self.MARGINE,self.MARGINE)	#細かい見た目の設定と、BOXサーフェスに対する貼り付け位置
 		#ボタンの描画
-		for button in self.button_list:
-			button.draw(surface,left_top,self.font)
+		for button in self.get_all_buttons() :
+			#ハイライト表示に関する制御
+			if highlight and highlight is button :
+				button.draw(surface,left_top,self.font,highlight=True)
+			else :
+				button.draw(surface,left_top,self.font)
+			#描画位置(左上)のシフト
 			left_top = (left_top[0]+button._width+self.MARGINE,left_top[1])
 		self.get_father().screen.blit(surface,rect)
 		pygame.display.update(rect)	
@@ -602,7 +780,21 @@ class Button_Box(BASE_BOX):
 					break
 	
 	def process_MOUSEMOTION(self,event):
-		pass
+		"""
+		on_mouseイベントに対するバインドの呼び出しを行います。
+		一般的に行われるべき処理はボタンのハイライト描画のための処理です。
+		"""
+		relative_pos = self.convert_pos_to_local(event.pos)	#BOX相対座標値へ変換
+		for button in self.get_all_buttons() :
+			if button.collide_point(relative_pos) :
+				button.process_MOUSEMOTION(event)
+				self.need_refresh = True
+				break
+		#breakされなかった時
+		else :
+			if self.need_refresh :
+				self.draw()	#リフレッシュ
+				self.need_refresh = False
 
 	def process_MOUSEDRAG(self,event):
 		pass
@@ -635,12 +827,11 @@ class Content_of_ButtonBox(Content):
 		self.string = unicode(" "+string+" ","utf-8")	#エンコードしとく
 		self.id = id_str
 	
-	def collide_point(self,pos):
+	def collide_point(self,*pos):
 		"""
 		与えられた引数pos=(x,y)の表す地点がこのクラスを継承するオブジェクトの描画範囲に衝突しているか否かについての判定をするメソッド。真偽値を返す。
 		"""
-		x = pos[0]
-		y = pos[1]
+		x , y = parse_coordinate(*pos)
 		left_top , width , height = self.get_size()
 		if left_top[0] <= x <= width+left_top[0] and left_top[1]+height >= y >= left_top[1] :
 			return True
@@ -663,6 +854,16 @@ class Content_of_ButtonBox(Content):
 		このオブジェクトに与えられた描画範囲情報についてのゲッターメソッド
 		"""
 		return self._left_top , self._width , self._height
+
+	def process_MOUSEMOTION(self,event):
+		"""
+		このメソッドは一般的なすべてのボタンオブジェクトに共通するハイライト処理に関するステートメントを定義します
+
+		このメソッドが呼ばれた時、親ボタンBOXをー自身をそのコンテキストの一部として渡してー再描画します
+		親Boxはこのコンテキストを元に、そのオブジェクト(すなわち、この呼び出し元のオブジェクト自身)に、
+		自身をハイライトして描画すべきであることをdraw()の引数ーコンテキストを通じて伝えます。
+		"""
+		self.get_parent_box().draw(highlight=self)
 
 
 class Label_of_ButtonBox(Content_of_ButtonBox):
@@ -694,6 +895,12 @@ class Label_of_ButtonBox(Content_of_ButtonBox):
 		"""
 		pass
 
+	def process_MOUSEMOTION(self,event):
+		"""
+		イベント処理はなにもしない
+		"""
+		pass
+
 
 class UI_Button(Content_of_ButtonBox):
 	"""
@@ -707,14 +914,18 @@ class UI_Button(Content_of_ButtonBox):
 		self._left_top , _width , _height= (0,0) , 0 , 0
 		self.synchronize_with_focuse_content = None	#ボタンstate同期用の関数。self.set_synchro_function()で設定する。
 
-	def draw(self,target_surface,left_top,font):
+	def draw(self,target_surface,left_top,font,button_color=None,highlight=False):
 		"""
 		このメソッドの呼び出し元、すなわち、Button_Boxオブジェクトから提供される描画領域としてのサーフェスにボタンを描画する。
 		また、この際決定されるボタンサイズ、親Button_Boxオブジェクトにおける座標位置、についての情報をset_zize()により納する。
 		"""
-		button_color =  (255,0,0) if self.state else (255,255,255)
+		button_color = button_color or ( (255,0,0) if self.state else (255,255,255) )
 		surface = font.render(self.string,True,(0,0,0),button_color)
-		pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
+		#枠線の描画。ハイライト表示として定義されている場合は枠線を目立つようにする
+		if highlight :
+			pygame.draw.rect(surface,(250,0,0),surface.get_rect(),3)
+		else :
+			pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
 		target_surface.blit(surface,left_top)
 		#動的に決定される描画領域についての保存。self.collideなどで用いられる。
 		w , h = surface.get_width() , surface.get_height()
@@ -775,6 +986,84 @@ class No_Swith_Button(UI_Button):
 		このオブジェクトは状態を持たないので、ただ、ボタンが押された時には、規定のバインド関数を実行します。それ以上は何もしません。
 		"""
 		self.command(self)
+
+
+class Toggle_Button(UI_Button):
+	"""
+	このボタンオブジェクトは、３つ以上の"状態"を持つボタンで、UI_Buttonを継承する。
+	つまるところ、それに３つ以上の状態の概念をデコレイトするクラスである。
+
+	このオブジェクトは３つ以上の「状態」を「状態のリスト」のそのindex値としてself.stateに格納する。
+	「状態のリスト」とは、「状態を表す文字列のリスト」であって、これによってボタンプレスドコマンド関数は、今すべき処理を確定せしめるだろう。
+	また、「状態（を表す文字列）」とは、実際にボタン上に表示される文字列でもある。
+	実際の状態の変化に基づく、このオブジェクト内におけるデータの変化については、やはりこのオブジェクトのメソッドが請け負う。
+	"""
+	def __init__(self,states,id_str,command):
+		"""
+		"""
+		if not isinstance(states,(list,tuple)) :
+			raise Exception("引数が不正です。")
+		elif len(states) <= 2 :
+			raise Exception("リストメンバ数が不十分です。")
+
+		self.state = 0	#初期状態
+		self.states = states
+		initial_string = states[0]
+		UI_Button.__init__(self,initial_string,id_str,command)
+
+	def call_synchro_function(self):
+		"""
+		定義されていれば、シンクロ関数をコールする。
+		シンクロ関数が未定義ならば、チャートオブジェクトは複雑な「状態」について関知しない（予定）なので状態を初期化しちゃう。
+		"""
+		if self.synchronize_with_focuse_content :
+			self.synchronize_with_focuse_content(self)
+		else :
+			self.initialize_state()
+		return True
+
+	def initialize_state(self):
+		"""
+		「状態」情報を完全に初期化する。
+		また、フォーカスのあるチャートオブジェクトの状態もこの状態に同期する為にcommandを手放しで呼ぶ。
+		"""
+		self.string = self.get_state_str()
+		self.command(self,initialize=True)
+
+	def get_state_str(self,index=None):
+		"""
+		引数に与えられたindex値としてのstate値の表現する「状態」を、表現する文字列を返す。
+		なお、index値は省略可能で、その時には、現在の「状態」を表す文字列を返す。
+		"""
+		if index != None and 0 <= index < len(self.states) :
+			return self.states[index]
+		else :
+			return self.states[self.state]
+
+	def get_next_state(self):
+		"""
+		次の「状態」のstate値を返す。
+		"""
+		next_state = self.state + 1
+		if next_state > len(self.states)-1 :
+			next_state = 0
+		return next_state
+
+	def switch_state(self):
+		"""
+		このボタンの「状態」を変える。即ち、
+		1,内部的な状態を格納するself.state属性値を変更する。
+		2,ボタンの説明文字列self.string属性値を変更する。
+		"""
+		self.set_state( self.get_next_state() )
+		self.string = self.get_state_str()	#「状態」を表すボタン上の文字列の更新
+
+	def draw(self,target_surface,left_top,font,button_color=None,highlight=False):
+		"""
+		UIボタンクラスのdrawメソッドは、状態により色を勝手に変更してしまうので、これを明示的に宣言する必要がある。
+		"""
+		color = (255,255,200)
+		UI_Button.draw(self,target_surface,left_top,font,button_color=color,highlight=highlight)
 
 
 class Tab(object):
@@ -880,24 +1169,22 @@ class Horizontal_Ruler(object):
 			return False
 
 
-class Chart_Analyser(object):
+class Price_Converter:
 	"""
-	チャートアナライザー。よく決まってない。あとで実装する機能が増えてから実際の構造は考える。
-	"""
-	def __init__(self):
-		pass
-
-
-class Price_Converter(Chart_Analyser):
-	"""
-	「価格データの系列を用いて、そのデータを均衡化したようなデータの系列を一意に算出する」ような機能の実装されたすべてのクラスの基底クラス。
-	このクラスを継承するすべてのクラスは、Stock_Chartオブジェクトに関係づけられることを前提としています。
-	このクラスの子クラスのオブジェクトは、calc()の呼び出しによってそのデータの算出を行い、draw()によってそのデータをグラフィカルに表現します。
-	このクラスの子クラスのオブジェクトの有するデータ情報の実態であるlistオブジェクト(実際には効率化のためタプルに変換して格納される)は、親Stock_Chartオブジェクトの有する、価格データの実態たるstock_price_listと完全に対応したデータを格納している。
+	あるStockChartオブジェクトに格納されたデータを変換、静的に保持する為のオブジェクト。なお、そのデータの描画も担当する。
+	この子クラスのオブジェクトは、calc()の呼び出しによってそのデータの算出を行い、draw()によってそのデータをグラフィカルに表現します。
+	このクラスを継承するクラスのオブジェクトの有するデータ情報の実態であるlistオブジェクト(実際には効率化のためタプルに変換して格納される)は、親Stock_Chartオブジェクトの有する、価格データの実態たるstock_price_listと完全に対応したデータを格納している。
 	即ち、ある値indexにおいてstock_price_list[index]の値は、このクラスのインスタンスのもつデータリストのlist[index]の値と完全に関連づいている
 	なお、このデータリストにおいて、「無効な値」はint値「0」として定義され、格納されている。
+
+	このオブジェクトは、属性値として、visibilityを、統一的なデータアクセス用のインターフェイスとしてget_datalist,あるいはget_valueを、有する。
+
+	なお、このクラスはこのクラス単体でも用いることができる。
+	その場合、このクラスの__init__メソッドの引数にdatalistを定義するか、あるいは明示的にこのクラスのプライベートメソッドであるset_datalistを呼ぶ。
+	self.__set_datalistメソッドは、引数のデータリストを詳しく検証し、エラーチェックを行う。
+	正しいデータのセットであると判断されたら、子クラスに継承されることを前提とされたcalc,get_datalistをこのクラスで独立して使用出来るようオーバーライドする。
 	"""
-	def __init__(self,parent,color,visible):
+	def __init__(self,parent,color,visible,plot_visible=False,line_visible=True,datalist=None):
 		"""
 		親Stock_Chartオブジェクト、描画に用いるRGB値、可視不可視についての設定。
 		"""
@@ -906,24 +1193,70 @@ class Price_Converter(Chart_Analyser):
 		self.parent = parent	#親のStock_Chartオブジェクト
 		self.color = color 
 		self.visible = visible
+		self.plot_visible = plot_visible
+		self.line_visible = line_visible
+		if datalist :
+			self.__set_datalist(datalist)
 
+	def get_parent(self):
+		return self.parent
+
+	#オブジェクト全体の可視設定
 	def set_visible(self,visible=True):
 		self.visible = visible
 
-	def set_imvisible(self):
+	def set_invisible(self):
 		self.visible = False
 
 	def is_visible(self):
 		return self.visible
+
+	#プロットポイントについての可視設定
+	def set_plot_visible(self,visible=True):
+		self.plot_visible = visible
+
+	def set_plot_invisible(self):
+		self.plot_visible = False
+
+	#線についての可視設定
+	def set_line_visible(self,visible=True):
+		self.line_visible = visible
+
+	def set_line_invisible(self):
+		self.line_visible = False
+
+	def get_datalist(self):
+		raise Exception("オーバーライドされていません")
 
 	def get_value(self,index):
 		"""
 		すべての子クラスが実装すべきインターフェイス。
 		引数に渡されたindex値に対する価格データ値、valueを返す。
 		このindex値は親Stock_Chartオブジェクトの有するstock_price_listにおけるindex値に完全に対応する。
+		なお、無効な値は「０」として定義されている。
 		"""
-		return self.datalist[index]	#変数名の関係でオーバーライドはご自由に
-	
+		return self.get_datalist()[index]
+
+	def __set_datalist(self,datalist):
+		"""
+		特殊なデータ設定メソッド。
+		これにより外部から直接価格のリストをインポートして、このクラスにより提供される便利なインターフェイスメソッド群を用いることができる
+		このメソッドでは、データが適当なものかをチェックし、いくつかの子クラスの為のインターフェイスメソッドを無効にしたり、このクラス単体でそれらを利用できるように、オーバーライドする。
+		"""
+		#データの検証。
+		def throw_error(string):
+			raise Exception(string)
+		len(self.get_parent().get_price_data()) == len(datalist) or \
+			throw_error("リストの長さは親オブジェクトと同一でなくてはなりません")
+		check_int = ( lambda val : isinstance(val,int) or throw_error("与えられたデータにint値以外が含まれています") )
+		[ check_int(data) for data in datalist ]	#すべてのdataに対してcheck_int関数を通す
+
+		#データリストの格納
+		self.datalist = datalist
+		#子クラスに提供する為に定義されているメソッド郡をこのクラス単体で用いることができるようにオーバーライドする。
+		self.calc = ( lambda : throw_error("set_dataによって定義されたデータはcalcできません。") )
+		self.get_datalist = ( lambda : self.datalist )
+
 	def calc(self):
 		"""
 		すべての子クラスがオーバーライドすべきメソッド
@@ -935,9 +1268,34 @@ class Price_Converter(Chart_Analyser):
 	def draw_to_surface(self,surface):
 		"""
 		self.calc()によって算出、格納された価格データ情報に基づいて、与えられたサーフェスに描画するメソッド。
-		データリストのインターフェイスが同じなので描画関数は共有できる。
 		"""
-		raise Exception("変数名を絶対実装すべきインターフェイスとして定義するわけにもいかんのでOverrideしてください。")
+		if not self.is_visible() :
+			return False
+		start , end = self.parent.get_drawing_index()
+		datalist = self.get_datalist()
+		if not datalist :
+			raise Exception("データリストが未定義です。")
+		parent = self.get_parent()
+		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
+		f = ( lambda  index,price : ( parent.get_index2pos_x(index) , int(round(parent.price_to_height(price))) ) )
+		point_list = [ f(index,datalist[index]) for index in range(start,end+1) if datalist[index] ]
+		#プロットポイントの描画
+		if self.plot_visible :
+			self.draw_point_to_surface(surface,point_list)
+		#線の描画
+		if self.line_visible :
+			pygame.draw.aalines(surface,self.color,False,point_list)
+
+	def draw_point_to_surface(self,surface,point_list):
+		"""
+		与えられたサーフェスに価格データをプロットする。
+		ただし、価格データの座標値への変換については、親関数であるdraw関数による。
+		即ち、すでに変換された座標値のリストを引数に取る。
+		"""
+		candle_width , Nouse = self.get_parent().get_drawing_size()
+		point_size = int( float ( candle_width / 2 ) )
+		for point in point_list :
+			pygame.draw.circle(surface,self.color,point,point_size)
 
 
 class Moving_Average(Price_Converter):
@@ -946,6 +1304,7 @@ class Moving_Average(Price_Converter):
 	"""
 	def __init__(self,parent,days,price_type,color,visible=True):
 		"""
+		Price_Converterデフォルトの引数であるparent,colorの他に、移動平均算出のための属性値ー移動平均日数days,算出に用いる価格型price_typeを引数に取る。
 		"""
 		Price_Converter.__init__(self,parent,color,visible)
 		self.days = days	#移動平均日数
@@ -961,19 +1320,16 @@ class Moving_Average(Price_Converter):
 		"""
 		return self.days
 
-	def get_value(self,index):
-		"""
-		引数indexで定義される移動平均値を返す。indexの値は親Stock_Chartオブジェクトのprice_listにおけるindex値と同期されている。
-		ただし、無効な値としてそれが定義されていたとき、仮の値として0を返す。
-		"""
-		return self.MAlist[index]
+	def get_datalist(self):
+		return self.MAlist
 
 	def calc(self):
 		"""
 		全チャート期間における移動平均値を算出し、self.MAlistに格納する。
 		"""
 		MAlist = []	#一時変数。最後にタプル化したものをself.MAlistに格納
-		price_list = self.parent.stock_price_list
+		parent = self.get_parent()
+		price_list = parent.get_price_data()
 		target_index = self.parent.pricetype2index(self.price_type)	#定義された価格タイプを表すprice_listにおけるindex値
 		f = ( lambda x : MAlist.append(0) )	#一時関数。無効な値としてindex値に対応させておくためのユーティリティ
 		#移動平均値の算出。算出可能なのは、index値が少なくともself.days以上の時。
@@ -994,16 +1350,6 @@ class Moving_Average(Price_Converter):
 					f(0)	#無効な値として0を格納しておく。
 		self.MAlist = tuple(MAlist)
 
-	def draw_to_surface(self,surface):
-		"""
-		self.calc()によって算出、格納された価格データ情報に基づいて、与えられたサーフェスに描画するメソッド。
-		"""
-		start , end = self.parent.get_drawing_index()
-		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
-		f = ( lambda  index,price : ( self.parent.get_index2pos_x(index) , self.parent.price_to_height(price) ) )
-		point_list = [ f(index,self.MAlist[index]) for index in range(start,end+1) if self.MAlist[index] ]
-		pygame.draw.aalines(surface,self.color,False,point_list)
-
 
 class Actual_Account_Analyser(Price_Converter):
 	"""
@@ -1013,16 +1359,11 @@ class Actual_Account_Analyser(Price_Converter):
 	"""
 	def __init__(self,parent,color,visible=True):
 		Price_Converter.__init__(self,parent,color,visible)
-		if not isinstance(parent,Stock_Chart) :
-			raise Exception("親コンテンツオブジェクトが不正な型です")
 		self.AAlist = ()
 		self.least_numof_MA = 3		#実質的価値の算出に最低限３つはMAのデータがほしい
 
-	def get_value(self,index):
-		"""
-		index値に対するAAlistの値を返すインターフェイス
-		"""
-		return self.AAlist[index]
+	def get_datalist(self):
+		return self.AAlist
 	
 	def calc(self,MAlist):
 		"""
@@ -1030,7 +1371,7 @@ class Actual_Account_Analyser(Price_Converter):
 		ここで生成されるデータリストAAlistのindex値は、親Stock_Chartオブジェクトにおけるstock_price_listにおけるindex値に完全に対応する。
 		"""
 		AAlist = []
-		endindex = len(self.parent.stock_price_list)
+		endindex = len(self.get_parent().get_price_data())
 		numof_MA = len(MAlist)
 		for index in range(endindex+1) :
 			MA_values = [ MAlist[i].get_value(index) for i in range(numof_MA) if MAlist[i].get_value(index) ]
@@ -1043,15 +1384,69 @@ class Actual_Account_Analyser(Price_Converter):
 
 		self.AAlist = tuple(AAlist)	#Tuple化して登録
 
-	def draw_to_surface(self,surface):
+
+class Middle_Price_Analyser(Price_Converter):
+	"""
+	関連付けられる株価データのすべての個々の足についての、「中間価格」をそれぞれ分析するオブジェクト。
+	"""
+	def __init__(self,parent,color,visible=True):
+		Price_Converter.__init__(self,parent,color,visible,plot_visible=True,line_visible=False)
+		self.MPlist = ()
+		self.compensation = False	#価格補正を行うか否か
+
+	def get_datalist(self):
+		return self.MPlist
+
+	def calc(self):
 		"""
-		self.calc()によって算出、格納された価格データ情報に基づいて、与えられたサーフェスに描画するメソッド。
+		中間価格の算出、格納を行うメソッド。
 		"""
-		start , end = self.parent.get_drawing_index()
-		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
-		f = ( lambda  index,price : ( self.parent.get_index2pos_x(index) , self.parent.price_to_height(price) ) )
-		point_list = [ f(index,self.AAlist[index]) for index in range(start,end+1) if self.AAlist[index] ]
-		pygame.draw.aalines(surface,self.color,False,point_list)
+		MPlist = []
+		parent = self.get_parent()
+		for price_ls in parent.get_price_data() :
+			opning , closing = parent.get_opning_closing_price(price_ls)
+			high , low , Nouse = parent.get_price_range(price_ls)
+			#無効な値の検出。
+			if [ price for price in price_ls if not price ] :
+				middle_price = 0
+			else :
+				#価格補正あり
+				if self.compensation :
+					#陽足なら
+					if closing >= opning :
+						middle_price = ( high + opning ) / 2
+					#陰足ならば
+					elif opning >= closing :
+						middle_price = ( opning + low ) / 2
+				else :
+					middle_price = ( opning + closing ) / 2
+			MPlist.append(middle_price)
+
+		self.MPlist = tuple(MPlist)
+
+
+class Price_Type_Extractor(Price_Converter):
+	"""
+	定義された価格タイプ(寄り付き、終値etc..)をもつ価格値の集合を抽出、格納するオブジェクト。
+	"""
+	def __init__(self,parent,color,visible=True):
+		Price_Converter.__init__(self,parent,color,visible,plot_visible=False,line_visible=False)
+		self.datalist = ()
+
+	def get_datalist(self):
+		return self.datalist
+
+	def calc(self,price_type):
+		"""
+		価格タイプを表す文字列を引数に取り、親オブジェクトのその価格タイプを有する価格値の集合を算出、格納します。
+		"""
+		if not isinstance(price_type,str) :
+			raise TypeError("不正な引数です。")
+		parent = self.get_parent()
+		target_index = parent.pricetype2index(price_type)
+		datalist = [ price_list[target_index] for price_list in parent.get_price_data() ]
+
+		self.datalist = tuple(datalist)
 
 
 class Stock_Chart(Content):
@@ -1156,9 +1551,8 @@ class Stock_Chart(Content):
 			#データのフェッチに失敗すればFalseを返す
 			if not self.download_price_data() :
 				return False
-		#チャート上オシレーターの初期化
-		self.set_default_moving_averages()
-		self.set_AA_analyser()
+		#価格コンバータの初期化
+		self.set_default_analysers()
 		return True
 
 	def get_moving_averages(self):
@@ -1172,6 +1566,18 @@ class Stock_Chart(Content):
 		関連づけられた実質的価値算出オブジェクトを返すインターフェイス。
 		"""
 		return self.AA_analyser
+
+	def get_MP_analyser(self):
+		"""
+		関連付けられた中間価格算出オブジェクトを返す
+		"""
+		return self.MP_analyser
+
+	def get_PT_extractors(self):
+		"""
+		関連付けられた価格タイプ抽出機オブジェクトを返す
+		"""
+		return self.PT_extractors
 
 	def set_zoom_scale(self,scale=None):
 		"""
@@ -1222,6 +1628,8 @@ class Stock_Chart(Content):
 		if dummy :
 			raise Exception("引数は明示的に宣言してください")
 		if start != None :
+			if not ( 0 <= start <= len(self.get_price_data()) ) :
+				raise Exception("引数が不正です")
 			self._drawing_start_index = start
 		elif end :
 			if end >= len(self.stock_price_list) :
@@ -1243,7 +1651,7 @@ class Stock_Chart(Content):
 		"""
 		if isinstance(data,(list,tuple)) and data :
 			self.stock_price_list = tuple(data)
-			self.set_drawing_index( end =len(data) -1 )
+			self.set_drawing_index( end = len(data)-1 )
 
 	def get_price_data(self):
 		return self.stock_price_list
@@ -1621,10 +2029,11 @@ class Stock_Chart(Content):
 
 		#ローソク足の描画
 		surface_drawn_candle = self.draw_candle(surface_size)
-		#移動平均線の描画
+		#価格コンバータの描画
 		surface_drawn_moving_average = self.draw_moving_average(surface_size)
-		#実質的価値表現線の描画
 		surface_drawn_actual_account = self.draw_actual_account(surface_size)
+		surface_drawn_middle_price = self.draw_middle_price(surface_size)
+		surface_drawn_price_type_extractor = self.draw_price_type_extractors(surface_size)
 		#出来高の描画
 		surface_drawn_turnover = self.draw_turnover(surface_size,font)
 		#座標の線などその他要素の描画
@@ -1647,6 +2056,8 @@ class Stock_Chart(Content):
 		surface.blit(surface_drawn_candle,(0,0))
 		surface.blit(surface_drawn_moving_average,(0,0))
 		surface.blit(surface_drawn_actual_account,(0,0))
+		surface.blit(surface_drawn_middle_price,(0,0))
+		surface.blit(surface_drawn_price_type_extractor,(0,0))
 
 	def get_drawing_size(self):
 		"""
@@ -1656,7 +2067,7 @@ class Stock_Chart(Content):
 		padding_size = int(round(zoom_scale * 4))
 		return candle_width,padding_size
 	
-	def get_surface(self,surface_size,color_key=BACKGROUND_COLOR):
+	def get_surface(self,surface_size,color_key=BACKGROUND_COLOR,alpha=0):
 		"""
 		サーフェスを得るためのユーティリティ関数。
 		チャートの描画に関しては、諸所の要素を諸所の描画メソッドにおいて描画し、そのサーフェスを持ち寄る形を取るから、透明設定が必要である
@@ -1665,6 +2076,8 @@ class Stock_Chart(Content):
 		surface = pygame.Surface(surface_size)
 		surface.set_colorkey(color_key)
 		surface.fill(color_key)
+		if alpha :
+			surface.set_alpha(alpha)
 		return surface
 
 	def set_index_posX_table(self):
@@ -1691,7 +2104,7 @@ class Stock_Chart(Content):
 		"""
 		ローソク足を描画したサーフェスを返す
 		"""
-		surface = self.get_surface(surface_size)
+		surface = self.get_surface(surface_size,alpha=200)
 		candle_width , padding_size = self.get_drawing_size()
 		zoom_scale = self.get_zoom_scale()
 		#ローソク足の描画
@@ -1713,6 +2126,15 @@ class Stock_Chart(Content):
 		surface = pygame.transform.flip(surface,False,True)
 		return surface
 
+	def set_default_analysers(self):
+		"""
+		アナライザーオブジェクトの設定に関する中間インターフェイスメソッド。
+		"""
+		self.set_default_moving_averages()
+		self.set_AA_analyser()
+		self.set_MP_analyser()
+		self.set_default_PT_extractors()
+
 	def set_default_moving_averages(self):
 		"""
 		デフォルトの移動平均線の登録を行う
@@ -1727,7 +2149,7 @@ class Stock_Chart(Content):
 		for day,color,visible in ma_days :
 			MA = Moving_Average(self,day,"C",color)
 			if not visible :
-				MA.set_imvisible()
+				MA.set_invisible()
 			self.moving_averages.append(MA)
 
 	def draw_moving_average(self,surface_size):
@@ -1736,16 +2158,14 @@ class Stock_Chart(Content):
 		MAオブジェクトの中でself.index_posX_tableを使います。
 		"""
 		surface = self.get_surface(surface_size)
-		start_index , end_index = self.get_drawing_index()
 		#移動平均値の算出と描画
 		for MA in self.moving_averages :
-			if MA.is_visible() :
-				MA.draw_to_surface(surface)
+			MA.draw_to_surface(surface)
 
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
 		return flipped_surface
 
-	def set_AA_analyser(self) :
+	def set_AA_analyser(self):
 		"""
 		実質的価値の分析を担当するActual_Account_Analyserクラスを生成し、このオブジェクトに登録する。
 		また、このメソッド内でActual_Account_Analyserのcalc()を呼び出し、実質的価値を表す株価の算出もすます。
@@ -1755,18 +2175,57 @@ class Stock_Chart(Content):
 				"\n実質的価値の算出を中止します。"
 			return False
 
-		color = (255,100,50)
+		color = Actual_Account_Color
 		AA_analyser = Actual_Account_Analyser(self,color)
 		AA_analyser.calc(self.moving_averages)
 		self.AA_analyser = AA_analyser
 
 	def draw_actual_account(self,surface_size):
+		return self.draw_analysed_price(surface_size,self.AA_analyser)
+
+	def set_MP_analyser(self):
 		"""
+		「中間値」の算出を担当するMiddle_Price_Analyserオブジェクトを生成し、このオブジェクトに登録する。
+		また、calcメソッドも明示的に呼び出し、その実際の算出、格納も済ます。
+		"""
+		color = Middle_Price_Color
+		MP_analyser = Middle_Price_Analyser(self,color)
+		MP_analyser.calc()
+		self.MP_analyser = MP_analyser
+
+	def draw_middle_price(self,surface_size):
+		return self.draw_analysed_price(surface_size,self.MP_analyser)
+
+	def set_default_PT_extractors(self):
+		"""
+		定義された価格タイプを有する価格値のセットとしてのPrice_Type_Extractorオブジェクトを生成し、このオブジェクトに関連付ける。
+		"""
+		opning_color = (0,0,255)
+		closing_color = (255,0,0)
+		price_types = [("O",opning_color),("C",closing_color)]
+		#call_calc:PT_extractorと価格タイプを引数にとって、calcを呼んで且つ、元のPT_extractorを返す。
+		#メソッド呼び出しをリスト内ですればその返り値にかかわらず、真が帰る。
+		call_calc = ( lambda PT_extractor , price_type : [ PT_extractor.calc(price_type) ] and PT_extractor )
+		PT_extractors = [ call_calc( Price_Type_Extractor(self,color) , price_type ) \
+			for price_type,color in price_types ]
+		self.PT_extractors = tuple(PT_extractors)
+
+	def draw_price_type_extractors(self,surface_size):
+		surface = self.get_surface(surface_size)
+		for PT_extractor in self.PT_extractors :
+			PT_extractor.draw_to_surface(surface)
+
+		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
+		return flipped_surface
+
+	def draw_analysed_price(self,surface_size,analyser):
+		"""
+		価格コンバータの描画のための共通インターフェイス。
 		"""
 		surface = self.get_surface(surface_size)
-		if self.AA_analyser.is_visible() :
-			self.AA_analyser.draw_to_surface(surface)
 
+		if analyser.is_visible() :
+			analyser.draw_to_surface(surface)
 		flipped_surface = pygame.transform.flip(surface,False,True)	#pygameでは(0,0)が左上なのでフリップ
 		return flipped_surface
 
@@ -2249,6 +2708,24 @@ class Stock_Chart(Content):
 		self._highlight_index = index
 		self.print_highlight_price_information()
 
+	def set_highlight_center(self):
+		"""
+		現在のハイライトインデックスを"中心"として、「描画インデックス」を、再定義する。
+		"""
+		center_index = self.get_highlight_index()
+		drawing_start , drawing_end = self.get_drawing_index()
+		num_of_candle = drawing_end - drawing_start
+
+		moving_val = (( center_index - drawing_start ) - ( drawing_end - center_index )) / 2
+		drawing_end += moving_val
+		end_max = len(self.get_price_data())
+		if drawing_end >= end_max :
+			drawing_end = end_max
+		elif drawing_end - num_of_candle <= 0 :
+			drawing_end = num_of_candle + 1
+
+		self.set_drawing_index(end=drawing_end)
+
 	def get_highlight_index(self):
 		"""
 		定義されたハイライト表示する要素のindex値を取得するインターフェイス。
@@ -2390,7 +2867,7 @@ class Stock_Chart(Content):
 	def process_KEYDOWN(self,event):
 		"""
 		キーバインドについての定義を行う。
-		hj:左、kl:右。SHIFT時:チャート移動。Ctrl+jk:サイズ変更
+		hj:左、kl:右。SHIFT+hl:チャート移動。SHIFT+jk:サイズ変更
 		"""
 		LEFTS = ( pygame.K_LEFT , pygame.K_h , pygame.K_j )
 		RIGHTS = ( pygame.K_RIGHT , pygame.K_l ,pygame.K_k )
@@ -2404,18 +2881,21 @@ class Stock_Chart(Content):
 				self.zoom_up()
 			elif event.key == pygame.K_DOWN :
 				self.zoom_down()
+			elif event.key == pygame.K_c :
+				self.set_highlight_center()
 		#シフトモディファ時
 		elif event.mod == pygame.KMOD_SHIFT :
-			if event.key in LEFTS:
+			if event.key == pygame.K_h:
 				self.move_drawing_index(-10)
-			elif event.key in RIGHTS :
+			elif event.key == pygame.K_l :
 				self.move_drawing_index(+10)
+			elif event.key == pygame.K_j :
+				self.zoom_down()
+			elif event.key == pygame.K_k :
+				self.zoom_up()
 		#コントロールモディファ時
 		elif event.mod == pygame.KMOD_CTRL :
-			if event.key in ( pygame.K_UP , pygame.K_k ):
-				self.zoom_up()
-			elif event.key in ( pygame.K_DOWN , pygame.K_j ):
-				self.zoom_down()
+			pass
 
 
 class Get_Url_Parser(HTMLParser):
@@ -2496,24 +2976,25 @@ class Setting_Tk_Dialog(object):
 		"""
 		履歴ファイルを読み、履歴のリストを返す。
 		"""
-		f = open(HISTORY_FILE,"r")
-		historys = [ hi for hi in f.read().split("\n") if hi.isdigit() ]
-		f.close()
+		with open(HISTORY_FILE,"r") as f :
+			historys = [ hi for hi in f.read().split("\n") if hi.isdigit() ]
+		self.historys = historys	#保存しとく
 		return historys
 
 	def write_history(self,security_code):
 		"""
 		証券コードを引数に取り、履歴ファイルに書く。
+		履歴は降順に書き込んでいく。つまり、最新の履歴は一番初めに書き込む。
 		"""
 		if not isinstance(security_code,int) and not str(security_code).isdigit() :
 			raise Exception("引数が不正です")
 		historys = self.load_history()
 		f = open(HISTORY_FILE,"w")
 
+		f.write("%s\n" % security_code)
 		for hi in historys :
 			if hi != security_code :
 				f.write(hi+'\n')
-		f.write(security_code)
 		f.close()
 
 	def additional_chart_setting(self):
@@ -2587,6 +3068,7 @@ class Setting_Tk_Dialog(object):
 		Tk.Button(self.root,text="done",command=self.done_initial_setting).pack()	#Button:入力終了時self.done()が呼ばれる。
 
 		#Global Binds
+		self.index = 0
 		def shortcut_bind(event):
 			#ダウンロードモード設定のショートカット
 			if event.char == "l" :
@@ -2606,8 +3088,23 @@ class Setting_Tk_Dialog(object):
 				self.term_for_a_bar_Tkvar.set(TERM_DICT["前場後場"])
 			elif event.char == "M" :
 				self.term_for_a_bar_Tkvar.set(TERM_DICT["5分足"])
+			#履歴機能
+			elif event.keysym == "Tab" :
+				index = self.index
+				if index >= len(self.historys) :
+					index = 0
+					self.security_code_Tkvar.set("")
+				else :
+					self.security_code_Tkvar.set(self.historys[index])
+					index += 1
+				self.index = index
+				#Tkvar.setが勝手にvalidateオプションを上書きしてしまうためconfigureで再定義
+				security_code_entry.configure(validate="key")
+			return "break"	#Tkinterのデフォルトのイベント処理をプリベンドする
+		#Set Binds
 		for char in tuple("ladsDWHM") :
 			self.root.bind("<%s>" % (char),shortcut_bind)
+		self.root.bind("<Tab>",shortcut_bind)
 
 		#Tk main_loop
 		self.root.mainloop()
@@ -2652,41 +3149,64 @@ class Setting_Tk_Dialog(object):
 #Initializations : Create and Set Default UI Objects
 def add_default_buttons(root):
 	"""
+	デフォルトボタンのファクトリ関数
 	"""
-	#足期間のショートカットボタン
-	button_box = Button_Box(root,"buttons_for_term",bgcolor=(255,200,200))
-	button_box.add_button(Label_of_ButtonBox("足期間"))
-	for term in TERM_LIST :
-		button = UI_Button(term,TERM_DICT[term],pressed_term_button)
-		button_box.add_button(button)
-	root.add_box(button_box)
+	def Create_term_shotcut_buttons():
+		"""ある足期間のチャートを生成するショートカットボタンのファクトリ"""
+		#足期間のショートカットボタン
+		button_box = Button_Box(root,"buttons_for_term",bgcolor=(255,200,200))
+		button_box.add_button(Label_of_ButtonBox("足期間"))
+		for term in TERM_LIST :
+			button = UI_Button(term,TERM_DICT[term],pressed_term_button)
+			button_box.add_button(button)
+		root.add_box(button_box)
 
-	#チャートについての詳細設定
-	button_box = Button_Box(root,"buttons_for_chart_setting",bgcolor=(200,255,200))
-	button_box.add_button(Label_of_ButtonBox("チャート設定"))
-	button_informations = []	#(id_str,bind_function,swiching,synchro_func)の情報を格納する一時変数
-	button_informations.append( ("Y-Prefix",pressed_Y_axis_fix_button,True,synchronize_Y_axis_fix) )
-	button_informations.append( ("RulerDefault",pressed_set_ruler_default,False,None) )
-	button_informations.append( ("RulerMiddle",pressed_set_middle_ruler_center,False,None) )
-	button_informations.append( ("AA-line",pressed_AA_button,True,synchronize_AA) )
-	#登録
-	for id_str , bind_function , swiching , synchro_func in button_informations :
-		if swiching :
-			button = UI_Button(id_str,id_str,bind_function)
+	def Create_chart_setting_buttons():
+		"""フォーカスのあるチャートについての詳細設定に関するショートカットボタン"""
+
+		#チャート設定用のボタンボックスの設定
+		button_box = Button_Box(root,"buttons_for_chart_setting",bgcolor=(200,255,200))
+		button_box.add_button(Label_of_ButtonBox("チャート設定"))
+
+		#ボタンの生成と登録
+		TYPE_NORMAL , TYPE_NOSWITCH , TYPE_TOGGLE = range(3)	#ボタンタイプ
+		#ボタンの定義
+		button_informations = [
+			( TYPE_NORMAL,"Y-Prefix",pressed_Y_axis_fix_button,synchronize_Y_axis_fix ),
+			( TYPE_NOSWITCH,"RulerDefault",pressed_set_ruler_default,None ),
+			( TYPE_NOSWITCH,"RulerMiddle",pressed_set_middle_ruler_center,None ),
+			( TYPE_NORMAL,"AA-line",pressed_AA_button,synchronize_AA ),
+			( TYPE_TOGGLE,"MP_Button",pressed_MP_button,None,("MP-OFF","MP-Plot","MP-Line","MP-All") ),
+			( TYPE_TOGGLE,"PT_Button",pressed_PT_button,None,("PT-OFF","PT-Plot","PT-Line","PT-All") ),
+			]#(button_type,id_str,bind_func,synchro_func,States)の情報を格納する一時変数
+
+		#ボタンの登録を行うユーティリティ一時関数
+		def regist_box(button_type,id_str,bind_func,synchro_func,*states):
+			if button_type == TYPE_NORMAL :
+				button = UI_Button(id_str,id_str,bind_func)
+			elif button_type == TYPE_NOSWITCH :
+				button = No_Swith_Button(" "+id_str+" ",id_str,bind_func)
+			elif button_type == TYPE_TOGGLE :
+				button = Toggle_Button(states[0],id_str,bind_func)
 			if synchro_func :
 				button.set_synchro_function(synchro_func)
-		else:
-			button = No_Swith_Button(" "+id_str+" ",id_str,bind_function)
-		button_box.add_button(button)
-	#移動平均線についてのショートカット
-	for MA_day in DEFAULT_MA_DAYS_ALL :
-		id_str = "MA-%d" % (MA_day)
-		label_str = "MA-%d" % (MA_day)
-		button = UI_Button(label_str,id_str,pressed_MA_setting_shortcut)
-		button.set_synchro_function(synchronize_MA)
-		button_box.add_button(button)
+			#登録
+			button_box.add_button(button)
+		#登録:副作用のある関数でマッピング
+		[ regist_box(*attr_tuple) for attr_tuple in button_informations ]
 
-	root.add_box(button_box)
+		#移動平均線についてのショートカット
+		for MA_day in DEFAULT_MA_DAYS_ALL :
+			id_str = "MA-%d" % (MA_day)
+			label_str = "MA-%d" % (MA_day)
+			button = UI_Button(label_str,id_str,pressed_MA_setting_shortcut)
+			button.set_synchro_function(synchronize_MA)
+			button_box.add_button(button)
+		root.add_box(button_box)
+
+	#Do Creation
+	Create_term_shotcut_buttons()
+	Create_chart_setting_buttons()
 
 def add_default_labels(root):
 	"""
@@ -2785,6 +3305,67 @@ def pressed_AA_button(button):
 	focused_box.draw()
 	return True
 
+def pressed_MP_button(button,initialize=False):
+	"""
+	中間価格を表現するグラフについてのvisible状態設定
+	"""
+	root = button.get_parent_box().get_father()
+	focused_box = root.get_focused_box()
+	focused_MP = root.get_focused_box().get_content().get_MP_analyser()
+
+	#初期化処理として呼ばれたなら、現状の状態に同期化する処理をし、さもなくば次の「状態」としてフォーカスオブジェクトを同期する
+	next_state = button.get_state_str() if initialize else button.get_state_str(button.get_next_state())
+	set_state = ( lambda visibility , plot_visible , line_visible :
+		( focused_MP.set_visible(visibility) , focused_MP.set_plot_visible(plot_visible) , focused_MP.set_line_visible(line_visible) )
+		)
+	if next_state == "MP-OFF" :
+		set_state(False,False,False)
+	elif next_state == "MP-Plot" :
+		set_state(True,True,False)
+	elif next_state == "MP-Line" :
+		set_state(True,False,True)
+	elif next_state == "MP-All" :
+		set_state(True,True,True)
+
+	#初期化処理以外ー即ち純粋なボタンプレスイベントに対してのみ「明示的に」再描画
+	#この関数がシンクロ関数として呼ばれた時(<=>initialize=True)、別の部分で必ず描画関数が呼ばれる。
+	if not initialize :
+		focused_box.draw()
+
+	return True
+
+def pressed_PT_button(button,initialize=False):
+	"""
+	価格タイプ抽出機によるグラフについてのvisible状態設定
+	"""
+	root = button.get_parent_box().get_father()
+	focused_box = root.get_focused_box()
+	focused_PTs = root.get_focused_box().get_content().get_PT_extractors()
+
+	#初期化処理として呼ばれたなら、現状の状態に同期化する処理をし、さもなくば次の「状態」としてフォーカスオブジェクトを同期する
+	next_state = button.get_state_str() if initialize else button.get_state_str(button.get_next_state())
+	#可視設定を行う一時関数
+	def set_state(visibility,plot_visible,line_visible):
+		for PT in focused_PTs :
+			PT.set_visible(visibility) , PT.set_plot_visible(plot_visible) , PT.set_line_visible(line_visible)
+
+	if next_state == "PT-OFF" :
+		set_state(False,False,False)
+	elif next_state == "PT-Plot" :
+		set_state(True,True,False)
+	elif next_state == "PT-Line" :
+		set_state(True,False,True)
+	elif next_state == "PT-All" :
+		set_state(True,True,True)
+
+	#初期化処理以外ー即ち純粋なボタンプレスイベントに対してのみ「明示的に」再描画
+	#この関数がシンクロ関数として呼ばれた時(<=>initialize=True)、別の部分で必ず描画関数が呼ばれる。
+	if not initialize :
+		focused_box.draw()
+
+	return True
+
+
 #Synchronizing Functions : those will be call'd when focused-object is changed
 def synchronize_Y_axis_fix(button):
 	"""
@@ -2847,6 +3428,42 @@ def get_human_readable(num):
 		return human_readable
 	else :
 		return no_human_readable
+
+def parse_coordinate(*coordinate,**kargs):
+	"""
+	１つのタプル、あるいは２つのint値として定義されるCoordinate値ー
+	ー即ち、座標値(x,y)、あるいはサイズ値(width,height)などをパースし、一定の形式でリターンする共通アルゴリズムとしてのユーティリティ
+
+	値が予期せぬ形式の時にはすぐに例外を送出するが、オプション引数testが定義された時には、ただNoneを返すだけにとどまる
+	"""
+	def error(message=None):
+		if test :
+			return
+		else :
+			message = message or ("引数はよきせぬ形式です : %r" % coordinate)
+			raise TypeError(message)
+
+	test = kargs.get("test",False)	#testが引数として定義されているなら例外送出を自重する
+	#長さが１以下ならば値は不正
+	if not coordinate :
+		error()
+	#座標値がタプルとして渡された場合
+	elif isinstance(coordinate[0],tuple) :
+		#レングスが２で全部intなら正常
+		if len(coordinate[0]) == 2 and all( (isinstance(val,int) for val in coordinate[0]) ) :
+			x , y = coordinate[0]
+		#アンパックし忘れの補足:冗長なエラー出力をしておく
+		elif isinstance(coordinate[0][0],tuple) :
+			error("予期せぬ引数です。この関数には値をアンパックして引数を定義してください。: %r" % coordinate)
+		else :
+			error()
+	#サイズ指定がタプルでなく省略形method(x,y)なら、
+	elif len(coordinate) == 2 and all( (isinstance(val,int) for val in coordinate) ) :
+		x , y = coordinate
+	else :
+		error()
+
+	return x,y	#純粋なタプルとして返す
 
 
 #Main Functions-----
