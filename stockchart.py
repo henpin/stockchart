@@ -1,6 +1,18 @@
 #! /usr/bin/python
 # -*- coding: utf-8 -*-
 
+import copy
+import math
+import sys
+import urllib2
+import os
+import Tkinter as Tk
+import tkMessageBox
+from datetime import date as Date
+from HTMLParser import HTMLParser
+import pygame
+from pygame.locals import *
+
 """
 株価チャートプログラム。
 1,Tkinter を用いて各種設定を行ったり、株式コードの入力を受け付ける。
@@ -25,13 +37,6 @@
 7,UI_Button_Label:
 	
 """
-import math,sys,urllib2,os
-import pygame
-from pygame.locals import *
-import Tkinter as Tk
-import tkMessageBox
-from datetime import date as Date
-from HTMLParser import HTMLParser
 
 #Global STATICS-----
 #About Object Sizese
@@ -171,7 +176,7 @@ class BASE_BOX():
 		return self._parent
 
 
-class Root_Container():
+class Root_Container:
 	"""
 	このアプリケーションのインターフェイスと描画、メインループ及びイベント処理、のすべてを司るクラスです。
 
@@ -194,12 +199,13 @@ class Root_Container():
 		self.key_information = {}	#pygameから提供されるキーの定数と、その押され続けているフレーム数の辞書
 		self.looping = True	#メインループのスイッチ
 		self.clock = pygame.time.Clock()
-		self.fps = 10
+		self.fps = 25
 		self.child_box_list = []	#すべてのGUI要素を含むリスト
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
 		self.initialized = False	#初期化処理が完全に完了しているか否かを表すフラグ。これがFalseの時は描画不能などの制限がある。
 		self.maximized = False		#このオブジェクトに関連付けられたスクリーンサーフェスが最大化されているかのフラグ
+		self.reserved_commands = []	#self.afterによって予約された実行待ちコマンドのリスト
 
 		#初期化処理
 		self.fill_background()
@@ -428,10 +434,9 @@ class Root_Container():
 				if event.type == pygame.QUIT or self.get_key_state(pygame.K_ESCAPE) :
 					self.looping = False	#停止。
 				elif event.type == pygame.MOUSEBUTTONDOWN :
-					self.fps = 20	#滑らかに動かす
 					self.process_MOUSEBUTTONDOWN(event)
 				elif event.type == pygame.MOUSEBUTTONUP :
-					self.fps = 10	#プロセッサ時間の節約
+					continue
 				elif event.type == pygame.VIDEORESIZE :
 					self.resize_window(event.size)
 				elif event.type == pygame.MOUSEMOTION :
@@ -471,8 +476,7 @@ class Root_Container():
 		"""
 		#最大化されていない状態なら最大化
 		if not self.maximized :
-			maxsize = pygame.display.list_modes()[0]	#最大のウィンドウサイズの取得
-			self.resize_window(maxsize)
+			self.resize_window((3000,3000))	#特定のWindowシステム上では自動でリサイズされるので動く
 			self.maximized = True	#フラグを立てる
 		else :
 			self.resize_window()	#引数なしの呼び出しでデフォルトサイズにリサイズ
@@ -521,7 +525,89 @@ class Root_Container():
 		"""
 		while self.looping:
 			self.event_loop()
+			self.execute_reserved_commands()
 			self.clock.tick(self.fps)
+
+	def after(self,msec,command):
+		"""
+		Rootオブジェクトに関数の呼び出しを予約する
+		引数にはint値ミリ秒msec,と呼び出し可能なcommandをとる。
+		引数チェックのあと、予約コマンドリストに追加します
+
+		なお、帰り値は新たに生成されたコマンドオブジェクトで、予約済みコマンドキャンセルメソッドself.cancel_commandはこれを引数にとります。
+		"""
+		#待機時間msecが100(=0.1秒)以上であり、commandがcallableか否か
+		if not ( isinstance(msec,int) and ( msec is 0 or msec >= 100 ) ) or not callable(command) :
+			raise TypeError("引数が不正です")
+
+		if msec is 0 :
+			#明示的にmsecに0が与えられたら、最小フレーム(=次フレーム)にコマンドを予約
+			numof_waiting_frame = 1
+		else :
+			#引数msecとRootの設定Fps値から何フレーム後にコマンドを予約するか算出
+			msec_per_frame = 1000 / self.fps	#self.fpsから、一フレームあたりの消費ミリ秒(1/1000秒)の算出
+			numof_pending_frame = msec / msec_per_frame	#実行待ちフレーム数の算出
+
+		#コマンドの登録
+		reserved_command = self.Reserved_Command(numof_pending_frame,command)
+		self.reserved_commands.append(reserved_command)
+
+		return reserved_command
+
+	def cancel_command(self,command):
+		"""
+		コマンドをキャンセルします。
+		このメソッドは冗長なエラー送出を行います。
+		このエラー送出を回避するには、その呼び出し元で、すべてのコマンドオブジェクトの有するis_cancelable()を呼び出して、取り消し可能かチェックすることです。
+		"""
+		if not isinstance(command,self.Reserved_Command) :
+			raise TypeError("引数がCommandオブジェクトでありません")
+		if command in self.reserved_commands :
+			self.reserved_commands.remove(command)
+		else :
+			raise Exception("指定されたコマンドオブジェクトが予約済みコマンドリストに存在していません")
+
+	def execute_reserved_commands(self):
+		"""
+		予約されたコマンドの残り消費フレームを更新して、それが無くなればコマンドを呼び出す
+		"""
+		for command in copy.copy(self.reserved_commands) :
+			command.spend_frame()
+			if command.remaining_frame <= 0 :
+				command.call()
+				self.reserved_commands.remove(command)
+
+	class Reserved_Command:
+		"""
+		コマンド予約用の単純なユーザー定義型。
+		"""
+		def __init__(self,numof_pending_frame,command):
+			if not ( numof_pending_frame >=2 and callable(command) ) :
+				raise TypeError("引数が不正です")
+
+			self.remaining_frame = numof_pending_frame	#残りフレーム数
+			self.command = command
+			self.cancelable = True	#取り消し可能か否か。単純な符号であり、必ずしも動作の完全性を保証しない。
+
+		def is_cancelable(self):
+			return self.cancelable
+
+		def call(self):
+			"""登録されたコマンドを呼び出す"""
+			self.cancelable = False
+			return self.command()
+
+		def spend_frame(self,numof_frame=1):
+			"""
+			残りフレーム数を引数分だけ消費する。
+			"""
+			#冗長なエラーチェック
+			if self.remaining_frame <= 0:
+				raise Exception("すでに残り消費フレームはありません")
+
+			self.remaining_frame -= numof_frame
+			if self.remaining_frame < 0 :
+				self.remaining_frame = 0
 
 
 class Label_box(BASE_BOX):
@@ -713,7 +799,7 @@ class Button_Box(BASE_BOX):
 		self.MARGINE = 3
 		self._height = font_size[1] + self.MARGINE * 2	#規定値によってデフォルトでは、静的な高さで生成される
 		self._left_top = (0,0)	#この値はRoot_Containerオブジェクトによってのみ設定可能
-		self.need_refresh = False
+		self.refresh_command = None
 
 	def __iter__(self):
 		"""
@@ -770,11 +856,9 @@ class Button_Box(BASE_BOX):
 
 	def process_MOUSEBUTTONDOWN(self,event):
 		if event.button == 1 :
-			my_left_top = self.get_left_top()
-			x = event.pos[0] - my_left_top[0]
-			y = event.pos[1] - my_left_top[1]
+			relative_pos = self.convert_pos_to_local(event.pos)	#Box相対座標
 			for button in self.button_list :
-				if button.collide_point((x,y)):
+				if button.collide_point(relative_pos):
 					button.process_MOUSEBUTTONDOWN(event)
 					self.draw()
 					break
@@ -788,13 +872,12 @@ class Button_Box(BASE_BOX):
 		for button in self.get_all_buttons() :
 			if button.collide_point(relative_pos) :
 				button.process_MOUSEMOTION(event)
-				self.need_refresh = True
-				break
-		#breakされなかった時
-		else :
-			if self.need_refresh :
-				self.draw()	#リフレッシュ
-				self.need_refresh = False
+				#ボタンのハイライト描画に関するリフレッシュ処理。
+				if self.refresh_command and self.refresh_command.is_cancelable() :
+						#前に定義したリフレッシュ関数が未実行ならキャンセル
+						self.get_father().cancel_command(self.refresh_command)
+				self.refresh_command = self.get_father().after(500,self.draw)	#リフレッシュコマンドの呼び出し予約
+				return
 
 	def process_MOUSEDRAG(self,event):
 		pass
@@ -922,10 +1005,12 @@ class UI_Button(Content_of_ButtonBox):
 		button_color = button_color or ( (255,0,0) if self.state else (255,255,255) )
 		surface = font.render(self.string,True,(0,0,0),button_color)
 		#枠線の描画。ハイライト表示として定義されている場合は枠線を目立つようにする
+		surface = pygame.Surface.convert(surface)	#renderdの上にdrawするにはConvertする必要がある
 		if highlight :
-			pygame.draw.rect(surface,(250,0,0),surface.get_rect(),3)
+			pygame.draw.rect(surface,(100,100,255),surface.get_rect(),2)
 		else :
 			pygame.draw.rect(surface,(0,0,0),surface.get_rect(),1)
+
 		target_surface.blit(surface,left_top)
 		#動的に決定される描画領域についての保存。self.collideなどで用いられる。
 		w , h = surface.get_width() , surface.get_height()
@@ -1432,6 +1517,7 @@ class Price_Type_Extractor(Price_Converter):
 	def __init__(self,parent,color,visible=True):
 		Price_Converter.__init__(self,parent,color,visible,plot_visible=False,line_visible=False)
 		self.datalist = ()
+		self.price_type = None
 
 	def get_datalist(self):
 		return self.datalist
@@ -1443,6 +1529,7 @@ class Price_Type_Extractor(Price_Converter):
 		if not isinstance(price_type,str) :
 			raise TypeError("不正な引数です。")
 		parent = self.get_parent()
+		self.price_type = price_type
 		target_index = parent.pricetype2index(price_type)
 		datalist = [ price_list[target_index] for price_list in parent.get_price_data() ]
 
@@ -2405,31 +2492,52 @@ class Stock_Chart(Content):
 		1,移動平均線についての情報。
 		2,Y-prefix
 		"""
+		#描画情報の定義、登録
+		def regist_drawing_setting_info() :
+			setting_informations = []	#描画のための一時リスト:要素は(string,color)のタプル
+			#Y軸固定
+			if self._Y_axis_fixed == True :
+				string , color = "Y軸固定" , (100,100,100)
+				setting_informations.append((string,color))
+			#価格コンバータ
+			#価格コンバーターを引数にとって自動で色を算出、returnする一時関数
+			Color_Of_Converter = \
+				( lambda price_converter : price_converter.color if price_converter.is_visible() else FOREGROUND_COLOR )
+			#MA
+			for MA in self.moving_averages :
+				days = "MA-%d" % (MA.days)
+				setting_informations.append((days,Color_Of_Converter(MA)))
+			#Actual-Account
+			AA = self.AA_analyser
+			string = "AA-line"
+			setting_informations.append((string,Color_Of_Converter(AA)))
+			#Middle-Price
+			MP = self.get_MP_analyser()
+			string = "MP"
+			setting_informations.append((string,Color_Of_Converter(MP)))
+			#PT_Extractor
+			for PT in self.get_PT_extractors() :
+				price_type = self.pricetype2string(PT.price_type)
+				setting_informations.append((price_type,Color_Of_Converter(PT)))
+			return setting_informations
+
+		#描画ルーチン
+		def draw_info(setting_informations,right_side) :
+			right = right_side
+			for string,color in setting_informations :
+				rendered = font.render(unicode(string,"utf-8"),True,color)
+				right = right - ( rendered.get_width() + side_padding/2 )
+				surface.blit(rendered,(right,v_padding))
+		#Do Draw
 		v_padding = self.vertical_padding
 		side_padding = self.right_side_padding
 		height = font.size("あ")[1] + v_padding
 		surface = self.get_surface((surface_size[0],height))
 		right = surface_size[0] - side_padding
-		#一時関数 : 適当な間隔で描画するにはこの関数に適当な引数を与えるだけで良い。
-		def f(string,color,right):
-			rendered = font.render(unicode(string,"utf-8"),True,color)
-			right = right - ( rendered.get_width() + side_padding/2 )
-			surface.blit(rendered,(right,v_padding))
-			return right
-		#描画
-		if self._Y_axis_fixed == True :
-			string , color = "Y軸固定" , (100,100,100)
-			right = f(string,color,right)
-		for MA in self.moving_averages :
-			days = "MA-%d" % (MA.days)
-			color = MA.color if MA.is_visible() else FOREGROUND_COLOR
-			right = f(days,color,right)
-		#Actual-Account
-		AA = self.AA_analyser
-		string = "AA-line" 
-		color = AA.color if AA.is_visible() else FOREGROUND_COLOR
-		right = f(string,color,right)
-			 
+
+		setting_informations = regist_drawing_setting_info()
+		draw_info(reversed(setting_informations),right)
+
 		return surface
 
 	def draw_horizontal_rulers(self,surface_size,font):
@@ -2687,6 +2795,26 @@ class Stock_Chart(Content):
 		elif price_type == "A" :
 			#Amount of Money
 			return 6
+		else :
+			raise Exception("引数が価格の種類を表していません")
+
+	def pricetype2string(self,price_type):
+		"""
+		価格の種類を表す短縮文字をヒューマンリーダブルな単語に変換するユーティリティ
+		"""
+		if price_type == "O" :
+			return "Opening"
+		elif price_type == "H" :
+			return "High"
+		elif price_type == "L" :
+			return "Low"
+		elif price_type == "C" :
+			return "Closing"
+		elif price_type == "T" :
+			return "TurnOver"
+		elif price_type == "A" :
+			#Amount of Money
+			return "Amount of Money"
 		else :
 			raise Exception("引数が価格の種類を表していません")
 
