@@ -724,65 +724,6 @@ class Label(object):
 	def process_MOUSEMOTION(self,event) :
 		pass
 
-#コンテナに関する枠組みの仮実装ーーーーーーーーーーーーー
-class Base_Container:
-	"""未定義"""
-	valid_type = None
-	def check_type(self,operand):
-		if self.valid_type is None or not isinstance(operand,self.valid_type) :
-			raise TypeError("引数が許可された型のオブジェクトではありません")
-		
-class Single_Container(Base_Container):
-	"""
-	１つの何らかのオブジェクトを「内包」するための枠組みを提供する抽象規定クラス
-	「１つ以上」のオブジェクトを格納するには、このクラスの継承クラスplural_containerを用いる
-	"""
-	def __init__(self):
-		"""仮実装"""
-		valid_type = Content
-		self.child = None
-
-	def set_child(self,content):
-		self.check_type(content)
-		self.child = content
-
-class Plural_Container(Base_Container):
-	"""
-	１つ以上の任意の個数のオブジェクトを格納するするためのコンテナオブジェクトに関する枠組みを規定する抽象規定クラス
-	"""
-	def __init__(self):
-		"""仮実装"""
-		valid_type = Content
-		self.childs = []
-
-	def add_child(self,content):
-		self.check_type(content)
-		self.childs.append(content)
-
-class Box_Container(Plural_Container):
-	"""
-	１つ以上のコンテナオブジェクトを有するコンテナオブジェクトを定義するための抽象基底クラス。
-	"""
-	def __init__(self):
-		"""
-		仮実装。まだ利用はしない。リファクタリング時に適用する
-		"""
-		valid_type = BaseBox
-		self.child_containers = []	#子コンテナのリスト
-
-	def add_box(self,box):
-		"""仮実装"""
-		self.check_type(box)
-		self.child_containers.append(box)
-
-	def is_box_container(self):
-		"""
-		このオブジェクトがBoxコンテナとして機能しているかどうかを真偽値で返す。
-		オブジェクトの多様性(=機能を実装してもそれを"利用しない"という選択肢)をサポートするため、オーバーライド必須
-		"""
-		raise Exception("オーバーライド必須です")
-#-------------------------
-
 
 class Container_Box(BASE_BOX):
 	"""
