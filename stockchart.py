@@ -199,7 +199,7 @@ class Root_Container:
 		self.key_information = {}	#pygameから提供されるキーの定数と、その押され続けているフレーム数の辞書
 		self.looping = True	#メインループのスイッチ
 		self.clock = pygame.time.Clock()
-		self.fps = 25
+		self.fps = 30
 		self.child_box_list = []	#すべてのGUI要素を含むリスト
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
@@ -208,11 +208,14 @@ class Root_Container:
 		self.reserved_commands = []	#self.afterによって予約された実行待ちコマンドのリスト
 
 		#初期化処理
-		self.fill_background()
 		add_default_buttons(self)	#デフォルトのボタンを配置
 		add_default_labels(self)	#デフォルトラベルの配置
 		Setting_Tk_Dialog(self).initial_chart_setting()	 #設定画面の呼び出し
+		self.update()	#内部構造の評価による描画領域の動的決定とdisplayへの反映
 		self.initialized = True		#初期化完了フラグを上げる
+
+		#メインループの開始
+		self.main_loop()
 
 	def check_initialized(self,kill=False):
 		"""
@@ -232,8 +235,7 @@ class Root_Container:
 			if isinstance(child,Container_Box):
 				self.set_focused_box(child)
 			self.child_box_list.append(child)
-			self.set_child_box_area()
-			self.draw()
+			self.update()
 		else:
 			raise TypeError("不正なオブジェクト型の代入です。")
 
@@ -275,6 +277,10 @@ class Root_Container:
 		#すべての子ボックスオブジェクトに対して描画領域の設定
 		left_top=(0,0)	#width,height
 		for child_box in self.child_box_list :
+			"""#Boxコンテナなら、内部のサイズ情報の算出
+			if isinstance(child_box,Container_Box) :
+				child_box.calc_size()
+			"""
 			#動的な高さ、あるいは幅で定義された子BOXならば、高さ、幅の設定を行う
 			if child_box.width_prefix == False:
 				child_box.set_width(display_width)	#処理が必要になったらheight同様動的に分割
@@ -302,6 +308,16 @@ class Root_Container:
 				num_of_dynamicheight_childbox += 1
 		average_height_percentage = int(100 / (num_of_dynamicheight_childbox or 1))
 		return average_height_percentage , prefixed_height_sum
+
+	def update(self):
+		"""
+		このRootオブジェクト以下の構造を再評価して、Box描画領域の再分割、全体の再描画、を明示的に行う。
+		このメソッドは、内部構造の変更後、常に呼び出してよい。
+		内部構造情報から正確な諸値をー最新の値としてー再導出するだけだから、
+		(古い情報が失われることと、その導出などに関するわずかなオーバーヘッド以外にはー)いかなる副作用もない。
+		"""
+		self.set_child_box_area()
+		self.draw()
 
 	def get_father(self):
 		return self
@@ -354,6 +370,7 @@ class Root_Container:
 		pygame.display.update(rect)
 
 	def draw(self):
+		self.fill_background()
 		for child_box in self.child_box_list:
 			child_box.draw()
 
@@ -707,6 +724,65 @@ class Label(object):
 	def process_MOUSEMOTION(self,event) :
 		pass
 
+#コンテナに関する枠組みの仮実装ーーーーーーーーーーーーー
+class Base_Container:
+	"""未定義"""
+	valid_type = None
+	def check_type(self,operand):
+		if self.valid_type is None or not isinstance(operand,self.valid_type) :
+			raise TypeError("引数が許可された型のオブジェクトではありません")
+		
+class Single_Container(Base_Container):
+	"""
+	１つの何らかのオブジェクトを「内包」するための枠組みを提供する抽象規定クラス
+	「１つ以上」のオブジェクトを格納するには、このクラスの継承クラスplural_containerを用いる
+	"""
+	def __init__(self):
+		"""仮実装"""
+		valid_type = Content
+		self.child = None
+
+	def set_child(self,content):
+		self.check_type(content)
+		self.child = content
+
+class Plural_Container(Base_Container):
+	"""
+	１つ以上の任意の個数のオブジェクトを格納するするためのコンテナオブジェクトに関する枠組みを規定する抽象規定クラス
+	"""
+	def __init__(self):
+		"""仮実装"""
+		valid_type = Content
+		self.childs = []
+
+	def add_child(self,content):
+		self.check_type(content)
+		self.childs.append(content)
+
+class Box_Container(Plural_Container):
+	"""
+	１つ以上のコンテナオブジェクトを有するコンテナオブジェクトを定義するための抽象基底クラス。
+	"""
+	def __init__(self):
+		"""
+		仮実装。まだ利用はしない。リファクタリング時に適用する
+		"""
+		valid_type = BaseBox
+		self.child_containers = []	#子コンテナのリスト
+
+	def add_box(self,box):
+		"""仮実装"""
+		self.check_type(box)
+		self.child_containers.append(box)
+
+	def is_box_container(self):
+		"""
+		このオブジェクトがBoxコンテナとして機能しているかどうかを真偽値で返す。
+		オブジェクトの多様性(=機能を実装してもそれを"利用しない"という選択肢)をサポートするため、オーバーライド必須
+		"""
+		raise Exception("オーバーライド必須です")
+#-------------------------
+
 
 class Container_Box(BASE_BOX):
 	"""
@@ -717,9 +793,15 @@ class Container_Box(BASE_BOX):
 	"""
 	def __init__(self,parent,content=None,font=None) :
 		self.set_parent(parent)
-		if content :
+		if content is not None:
+			#単純なコンテンツBoxとして機能
+			self.child_box_list = None
 			self.set_content(content)
-		self.child_box_list = None	#拡張性のため子BOXを考えている。ただし、コンテンツとの共存は考えていない。
+		else :
+			#空の実装の未定義のBoxとして定義。
+			#このオブジェクトをBoxのコンテナとして用いる場合はまずここで単純な初期化する。
+			self.child_box_list = None
+			self._content = None
 		self.font = font or pygame.font.Font(FONT_NAME,13)
 		self.bold_font = pygame.font.Font(BOLD_FONT_NAME,13)
 		self.height_prefix = False	#動的な大きさか静的な大きさか。デフォルトは前者。
@@ -735,11 +817,34 @@ class Container_Box(BASE_BOX):
 		return self._left_top
 
 	def set_content(self,content) :
+		"""
+		このBoxオブジェクトの格納するコンテンツオブジェクトを定義します
+		なお、このメソッドは、self.child_box_listがNoneであるときにしか利用できません。
+		"""
+		if self.child_box_list is not None :
+			raise Exception("このBoxは既にBoxオブジェクトのコンテナとして定義されています。")
+		elif not isinstance(content,Content) :
+			raise TypeError("引数がContentではありません")
+
 		self._content = content
 		content.set_parent_box(self)
 
 	def get_content(self):
 		return self._content
+
+	def add_box(self,child):
+		"""
+		子Boxを追加する。このメソッドはself._contentがNoneである場合にしか使えない。
+		"""
+		if self.get_content() is not None :
+			raise Exception("このコンテナBoxはすでにコンテンツオブジェクトによって使用されています。")
+		elif not isinstance(child,BASE_BOX) :
+			raise TypeError("引数がBoxでありません")
+
+		if self.child_box_list is None :
+			self.child_box_list = []	#初期化
+		#登録
+		self.child_box_list.append(child)
 
 	def draw(self):
 		"""
@@ -2968,7 +3073,18 @@ class Stock_Chart(Content):
 				break
 
 	def process_MOUSEMOTION(self,event):
-		pass	
+		"""
+		仮実装
+		"""
+		parent = self.get_parent_box()
+		candle_width , NoUse = self.get_drawing_size()
+		start , end = self.get_drawing_index()
+		for index in range(start,end+1) :
+			pos_x = self.get_index2pos_x(index)
+			if pos_x-candle_width <= event.pos[0] <= pos_x+candle_width:
+				self.set_highlight_index(index)
+				parent.draw()
+				break
 
 	def process_MOUSEDRAG(self,event):
 		"""
@@ -2980,9 +3096,9 @@ class Stock_Chart(Content):
 			#Event.posYをこのチャートオブジェクトにおけるY座標値に変換し、それをflip(左下が(0,0)の形に変換)する。
 			left_top_onroot = self.get_parent_box().get_left_top()
 			top_margin = self.vertical_padding / 2
-			pos_y_on_chart = self.get_parent_box().get_height() - ( event.pos[1] - left_top_onroot[1] ) - top_margin
+			NoUse,relative_Y = self.get_parent_box().convert_pos_to_local(event.pos)
 			#算出された仮想Y座標値に対する、設定された価格値を算出する。
-			price_for_posY = self.height_to_price(pos_y_on_chart)
+			price_for_posY = self.height_to_price(relative_Y)
 			self.focused_horizontal_ruler.set_price( int( round(price_for_posY) ) )
 			return True
 
@@ -3606,7 +3722,6 @@ def main():
 	pygame.display.set_caption("株チャートテクニカル分析")
 	pygame.display.set_mode(SCREEN_SIZE,pygame.RESIZABLE)
 	root = Root_Container()
-	root.main_loop()
 	pygame.quit()
 	sys.exit()
 
