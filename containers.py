@@ -14,31 +14,50 @@
 	「有効実装型」の設定と、そのチェックを行うための文脈を定義しています。
 
 	#クラス階層
-	*Base_Container
-		->Single_Container = _child
-		->Plural_Container = _children
-		->Container_Of_Container = _child_containers
-	*Contained
+	*Contained	=被コンテイン共通インターフェイス	=_container
+		->Base_Container	=多様性および共通ロジックのサポート
+			->Single_Container = _child
+			->Plural_Container = _children
+			->Container_Of_Container = _child_containers
 """
 
-class Base_Container(object):
+class Contained(object):
+	"""
+	コンテナオブジェクトの子オブジェクト(=被コンテイン型)となる型のインターフェイス
+	"""
+	def __init__(self):
+		self._container = None
+
+	def _set_container(self,container):
+		if self.get_container() is not None :
+			raise Exception("既に親コンテナを持っています。")
+		self._container = container
+
+	def get_container(self):
+		return self._container
+
+
+class Base_Container(Contained):
 	"""
 	コンテナオブジェクトの最小抽象基底クラス。
+	すべてのコンテナオブジェクトは、被コンテナでもある。つまり、この最小基底クラスはContainedを継承する。
 	"""
-	#Class Global Variables
-	implement_types = (
-		Single_Container,
-		Plural_Container,
-		Container_Of_Container,
-		)#コンテナ実装型のタプル
-
 	#Methods
 	def __init__(self):
 		"""
 		すべてのコンテナ実装型がこの初期化ルーチンを呼ばなくてはならない。
 		この初期化ルーチンでは、コンテナの多様性に関する初期化処理を行う。
 		"""
-		self.valid_types = []	#格納を許可するオブジェクトの型のリスト。要素がないならテストを無視
+		self.implement_types = (
+			Single_Container,
+			Plural_Container,
+			Container_Of_Container,
+			)#コンテナ実装型のタプル
+		#コンテナinコンテナのサポートのためContainedの初期化処理の呼び出し
+		Contained.__init__(self)
+
+		#格納を許可するオブジェクトの型のリスト。要素がないならテストを無視。多様性のために有効実装型ごとに格納
+		self.valid_types = { implement_type:[] for implement_type in self.implement_types }
 		self.valid_container_type = None	#コンテナの多様性をもたせる為の枠組み。現在有効な(ただ１つの)コンテナ型の情報。
 		self.need_container_diversity = False	#コンテナ多様性の必要性
 
@@ -50,9 +69,14 @@ class Base_Container(object):
 		イテラブルにします。
 		コンテナ多様性のために隠蔽されたクラスのメソッドを呼び出します。
 		"""
-		self.test_valid_container_type()
-		children = self.valid_container_type._get_children(self)
-		return iter(children)
+		self.test_valid_container_type()	#有効コンテナ型が定義済か確認
+		return iter(self.get_children())
+
+	def get_children(self):
+		"""
+		オーバーライド禁止。連鎖的に然るべきオブジェクトの隠蔽された_get_children()を呼ぶ。
+		"""
+		return self.get_valid_container_type()._get_children(self)
 
 	def _get_children(self):
 		"""
@@ -61,13 +85,14 @@ class Base_Container(object):
 		"""
 		raise Exception("オーバーライド必須です")
 
-	def test_child(self,child):
+	def test_child(self,child,implement_type=None):
 		"""
 		与えられた引数childがこのContainerに適合する型であるかを判別し、そうでないならエラーを送出します。
 		"""
+		valid_list = self.valid_types[self.get_valid_container_type()]
 		if not isinstance(child,Contained) :
-			raise TypeError("引数がContainedオブジェクトでありません")
-		elif self.valid_types and not any( isinstance(child,type) for type in self.valid_types ) :
+				raise TypeError("引数がContainedオブジェクトでありません")
+		elif valid_list and not any( isinstance(child,type) for type in valid_list ) :
 			raise TypeError("引数が許可された型のオブジェクトではありません")
 
 		return True
@@ -79,7 +104,7 @@ class Base_Container(object):
 		if self.valid_container_type is None :
 			raise Exception("有効コンテナ型が未定義です。")
 
-	def add_valid_type(self,valid_type):
+	def add_valid_type(self,valid_type,implement_type=None):
 		"""
 		子オブジェクトの型指定を行う。
 		引数には型オブジェクトかあるいは、そのタプルをとる。
@@ -88,6 +113,12 @@ class Base_Container(object):
 		class OldStyleClass :
 			pass
 
+		#引数調整
+		if implement_type is  None :
+			implement_type = self.get_valid_container_type()
+			if implement_type is None :
+				raise Exception("子オブジェクトの型指定について、有効型が設定されておらず、かつ有効実装型も未定義です。")
+
 		#引数がタプルなら要素ごとの再起呼び出しを行い、あるいは型オブジェクトでなければ例外を送出
 		if isinstance(valid_type,tuple) :
 			for each_type in valid_type :
@@ -95,7 +126,7 @@ class Base_Container(object):
 		elif type(valid_type) is not type and type(valid_type) is not type(OldStyleClass) :
 			raise TypeError("型オブジェクトでありません")
 		else :
-			self.valid_types.append(valid_type)	#登録
+			self.valid_types[implement_type].append(valid_type)	#登録
 
 	def set_valid_container_type(self,valid_type=None):
 		"""
@@ -106,15 +137,15 @@ class Base_Container(object):
 		#初期化処理
 		def set_valid_container_type_default():
 			#継承している実装型を真偽値で表すリスト
-			inherited = [ boolean for container_type in self.implement_types is isinstance(self,container_type) ] 
+			inherited = [ isinstance(self,container_type) for container_type in self.implement_types ]
 
 			if inherited.count(True) == 1 :
 				#継承されているコンテナ実装型が唯一ならば、それを有効コンテナ型に設定
 				index_of_inherited = (lambda(index):
-					(index_of_inherited(index+1) if not inherited[index] or index)
-					)(0)	#継承されている唯一の型を表すindexの算出
+					(index_of_inherited(index+1) if not inherited[index] else index))
+				index = index_of_inherited(0)
 				#設定
-				self.valid_container_type = implement_types[index_of_inherited]
+				self.valid_container_type = self.implement_types[index]
 				self.need_container_diversity = False
 			elif not any(inherited) :
 				#いかなる実装型も継承されていなければ例外を送出
@@ -146,6 +177,7 @@ class Base_Container(object):
 		"""
 		有効コンテナ型かどうか。
 		"""
+		self.test_valid_container_type()	#そもそも、ちゃんと定義済かどうかのチェック
 		if self.valid_container_type is container_type :
 			return True
 		else :
@@ -198,33 +230,118 @@ class Container_Of_Container(Base_Container):
 	def __init__(self):
 		Base_Container.__init__(self)
 		self._child_containers = []
-		self.add_valid_type(Base_Container)
+		self.add_valid_type(Base_Container,Container_Of_Container)
 
-	def add_child_container(self,container):
-		self.is_valid_container_type(Plural_Container)
+	def add_container(self,container):
+		self.is_valid_container_type(Container_Of_Container)
 		self.test_child(container)
 		self._child_containers.append(container)
-		content._set_container(self)
+		container._set_container(self)
 
 	def _get_children(self):
 		return self._child_containers
 
 
-class Contained(object):
+class Tester(object):
 	"""
-	コンテナオブジェクトの子オブジェクトとなる型のインターフェイス
+	単体テストクラス
+	クラス単一の単位でテストを行う。
 	"""
+	#Test Classes
+	class Container_Inherited_Plural(Plural_Container):
+		"""複数格納コンテナを継承するコンテナ実装"""
+		def __init__(self):
+			Plural_Container.__init__(self)
+
+
+	class Double_Inherited_Container(Single_Container,Container_Of_Container):
+		"""単一オブジェクト格納コンテナおよびコンテナコンテインナーを継承するコンテナ実装"""
+		def __init__(self):
+			Single_Container.__init__(self)
+			Container_Of_Container.__init__(self)
+
+	#Methods
 	def __init__(self):
-		self._container = None
+		"""
+		実装型のインスタンスの生成。
+		"""
+		#コンテナオブジェクト
+		self.Plural = self.Container_Inherited_Plural()
+		self.Double = self.Double_Inherited_Container()
+		#Containedオブジェクト
+		self.contained_list = []
 
-	def _set_container(self,container):
-		self._container = container
+	def append_contained_list(self,val):
+		"""ユーティリティ"""
+		self.contained_list.append(val)
+		return val
 
-	def get_container(self):
-		return self._container
+	def test_plural_container(self):
+		"""コンテナ実装のテスト"""
+		print "pluralコンテナのテストを開始します..."
+		for x in range(3) :
+			ins = self.append_contained_list(Contained())
+			self.Plural.add_child(ins)
+
+		print "\t子オブジェクト"
+		for child in self.Plural :
+			print "\t",child
+
+		print "Done\n"
+
+	def test_double_container(self):
+		"""多様性を有するコンテナ実装のテスト"""
+		print "Doubleコンテナのテストを開始します..."
+
+		#Container_Of_Container有効
+		print "Container_Of_コンテナを有効にしたテスト"
+		self.Double.set_valid_container_type(Container_Of_Container)
+		ins = self.append_contained_list(Plural_Container())
+		self.Double.add_container(ins)
+		print "\t子オブジェクト"
+		print "\t",self.Double.get_children()
+
+		#Single Container 有効
+		print "Singleコンテナを有効にしたテスト"
+		self.Double.set_valid_container_type(Single_Container)
+		ins = self.append_contained_list(Contained())
+		self.Double.set_child(ins)
+		print "\t子オブジェクト"
+		print "\t",self.Double.get_children()
+
+		#Container_Of_Container 再有効
+		print "Container_Of_コンテナを再び有効にしたテスト"
+		self.Double.set_valid_container_type(Container_Of_Container)
+		for x in range(3):
+			ins = self.append_contained_list(Single_Container())
+			self.Double.add_container(ins)
+
+		self.Double.add_container(self.append_contained_list(self.Plural))
+
+		print "\t子オブジェクト"
+		for child in self.Double :
+			print "\t",child
+		print "Done\n"
+
+	def test_contained(self):
+		"""Containedのテスト"""
+		print "Contaiendのテストを開始します..."""
+		for ins in self.contained_list :
+			print "\t",ins," 親:",ins.get_container()
+
+		print "Done\n"
+
+	def test_all(self):
+		"""Run all tests"""
+		print "テストを開始します"
+		self.test_plural_container()
+		self.test_double_container()
+		self.test_contained()
+		print "全体のテストが終了しました"
 
 
 if __name__ == '__main__' :
-	print "The Program Is Gone Now"
+	tester = Tester()
+	tester.test_all()
 
 
