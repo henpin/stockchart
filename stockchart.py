@@ -39,24 +39,24 @@ from pygame.locals import *
 """
 
 #Global STATICS-----
-#About Object Sizese
+#Sizes
 SCREEN_SIZE = (1000,600)
 BUTTON_SIZE = (40,30)
-#About General Colors
+#General Colors
 #FOREGROUND_COLOR = (224,235,235)
 #BACKGROUND_COLOR = (0,15,30)
 FOREGROUND_COLOR = (0,0,0)
 BACKGROUND_COLOR = (255,255,255)
-#About Chart Term
+#Chart Term
 TERM_LIST = "月足,週足,日足,前場後場,5分足,1分足".split(",")	#数字は半角
 TERM_DICT = dict( zip( (TERM_LIST+range(1,7)),(range(1,7)+TERM_LIST) ) )	#相互参照の列挙体としての辞書。 1:月足 2:週足 3:日足 4:前後場足 5:五分足 6:一分足
 TERM2URL_DICT = {"日足":"1d","前場後場":"4h","5分足":"5min","1分足":"minutely"}
-#About Local Files
+#Local Files
 FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
 BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
 CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
 HISTORY_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)),"history")
-#About Download Mode
+#Download Modes
 DOWNLOAD_MODE_LOCAL = 1
 DOWNLOAD_MODE_AUTO = 2
 DOWNLOAD_MODE_DIFF = 3
@@ -64,8 +64,7 @@ DOWNLOAD_MODE_DOWNLOAD = 4
 DOWNLOAD_MODE_ETC = 5
 DOWNLOAD_SITE_KDB = 10
 DOWNLOAD_SITE_ETC = 100
-#About Lines On Chart
-AA_LINE_COLOR = (200,0,0)
+#Lines On Chart
 MA_COLOR_DICT = {3:(200,120,0),5:(235,0,235),25:(0,0,255),75:(153,235,27),135:(139,0,0),200:(0,235,235)}
 DEFAULT_MA_DAYS_ALL = (3,5,25,75,135,200)
 f = ( lambda tup : tuple( [ (day,MA_COLOR_DICT[day],visible) for day,visible in tup ] ) )
@@ -75,6 +74,7 @@ DEFAULT_MA_DAYS_MINUTELY = f( ((3,False),(5,False),(25,False)) )
 #Optional
 DEBUG_MODE = 0
 #Chart Color
+AA_LINE_COLOR = (200,0,0)
 Actual_Account_Color = (255,100,50)
 Middle_Price_Color = (220,148,220)
 
@@ -85,15 +85,10 @@ class BASE_BOX():
 	BOXの基底クラス
 	"""
 	def get_rect(self):
+		"""このBoxに定義された描画領域を表すRectオブジェクトを返します。"""
 		left_top = self.get_left_top()
 		size = self.get_size()
 		return pygame.Rect(left_top,size)
-
-	def get_size(self):
-		"""
-		BOXサイズを表す(self.width,self.height)のタプルを返すだけ。
-		"""
-		return (self.width,self.height)
 
 	def get_father(self):
 		"""
@@ -103,15 +98,8 @@ class BASE_BOX():
 		return self.get_parent().get_father()
 
 	def collide_point(self,*pos):
-		"""
-		"""
-		x , y = parse_coordinate(*pos)
-		width , height = self.get_size()
-		left_top = self.get_left_top()
-		if left_top[0] <= x <= width+left_top[0] and left_top[1]+height >= y >= left_top[1] :
-			return True
-		else :
-			return False
+		"""定義された絶対座標値posがこのオブジェクトに与えられた描画領域と衝突するかチェックする"""
+		return self.get_rect().collidepoint(pos)
 
 	def convert_pos_to_local(self,*abs_pos):
 		"""
@@ -122,7 +110,6 @@ class BASE_BOX():
 		"""
 		abs_pos = parse_coordinate(*abs_pos)
 		left_top_onroot = self.get_left_top()
-
 		relative_pos = ( (abs_pos[0] - left_top_onroot[0]) , (abs_pos[1] - left_top_onroot[1]) )
 		return relative_pos
 
@@ -138,17 +125,15 @@ class BASE_BOX():
 		return surface
 
 	def get_label_box(self,id_str) :
-		"""
-		id_strで識別される、テキストの描画領域を提供するBOXオブジェクトを返します。
-		"""
-		return self.get_parent().get_label_box(id_str)
+		"""id_strで識別される、テキストの描画領域を提供するBOXオブジェクトを返します。"""
+		return self.get_father().get_label_box(id_str)
 
 	def get_button_box(self,id_str) :
-		"""
-		"""
-		return self.get_parent().get_button_box(id_str)
+		"""対象Boxオブジェクトをid参照で探す。"""
+		return self.get_father().get_button_box(id_str)
 
 	def get_size(self):
+		"""BOXサイズを表す(self.width,self.height)のタプルを返すだけ。"""
 		return (self._width , self._height)
 
 	def get_height(self):
@@ -193,7 +178,22 @@ class Root_Container:
 	keys_control_chart = (pygame.K_LEFT,pygame.K_RIGHT,pygame.K_UP,pygame.K_DOWN,pygame.K_h,pygame.K_j,pygame.K_k,pygame,K_l)
 
 	def __init__(self):
-		#インスタンス変数
+		"""
+		"""
+		#インスタンス変数の初期化
+		self.init_attr()
+		#初期化処理
+		add_default_buttons(self)	#デフォルトのボタンを配置
+		add_default_labels(self)	#デフォルトラベルの配置
+		Setting_Tk_Dialog(self).initial_chart_setting()	 #設定画面の呼び出し
+		self.update()	#内部構造の評価による描画領域の動的決定とdisplayへの反映
+		self.initialized = True		#初期化完了フラグを上げる
+
+		#メインループの開始
+		self.main_loop()
+
+	def init_attr(self):
+		"""インスタンスメンバ変数の初期化"""
 		self.screen = pygame.display.get_surface()
 		self.background_color = BACKGROUND_COLOR
 		self.key_information = {}	#pygameから提供されるキーの定数と、その押され続けているフレーム数の辞書
@@ -207,29 +207,18 @@ class Root_Container:
 		self.maximized = False		#このオブジェクトに関連付けられたスクリーンサーフェスが最大化されているかのフラグ
 		self.reserved_commands = []	#self.afterによって予約された実行待ちコマンドのリスト
 
-		#初期化処理
-		add_default_buttons(self)	#デフォルトのボタンを配置
-		add_default_labels(self)	#デフォルトラベルの配置
-		Setting_Tk_Dialog(self).initial_chart_setting()	 #設定画面の呼び出し
-		self.update()	#内部構造の評価による描画領域の動的決定とdisplayへの反映
-		self.initialized = True		#初期化完了フラグを上げる
-
-		#メインループの開始
-		self.main_loop()
-
-	def check_initialized(self,kill=False):
+	def check_initialized(self,error=False):
 		"""
 		初期化処理が完了しているか確認する
 		オプショナル引数killがTrueを取るとき、もし初期化処理が未完了なら、例外を投げる。
 		"""
-		if not self.initialized and kill :
+		if not self.initialized and error :
 			raise Exception("初期化処理が完了していません")
 		return self.initialized
 	
 	def add_box(self,child):
 		"""
-		このオブジェクトに新たなBOXオブジェクトを、子BOXとして登録します。
-		登録後、各BOXオブジェクトに割り当てる描画領域を更新します。
+		Contaierのremoveオブジェクトのラッパ
 		"""
 		if isinstance(child,BASE_BOX):
 			if isinstance(child,Container_Box):
@@ -241,6 +230,7 @@ class Root_Container:
 
 	def remove_box(self,child_box):
 		"""
+		Contaierのremoveオブジェクトのラッパ
 		"""
 		if len(self.get_all_container_box()) == 1:
 			print "唯一の要素です"
@@ -251,8 +241,7 @@ class Root_Container:
 			elif child_box == self.prefocused_box :
 				self.prefocused_box = None
 			self.child_box_list.remove(child_box)
-			self.set_child_box_area()
-			self.draw()
+			self.update()
 			return True
 
 	def get_children(self):
@@ -263,9 +252,11 @@ class Root_Container:
 
 	def set_child_box_area(self):
 		"""
-		(すべてのこのオブジェクトの子BOXオブジェクトに)描画領域の分配を行うメソッドで、まずself.calc_childbox_heightpercentage()メソッドを呼び出し、均等な分配のための値を算出し、その値を用いて、実際の設定を行う。
+		(すべてのこのオブジェクトの子BOXオブジェクトに)描画領域の分配を行うメソッド
+		まずself.calc_childbox_heightpercentage()メソッドを呼び出し、均等な分配のための値を算出し、その値を用いて、実際の設定を行う。
 
-		描画領域についてのすべての情報は、個々の子BOXオブジェクトのメンバ変数に保持されている。具体的には、box._left_topと、box.height、box.widthの3つの変数である。つまり、このメソッドはこの情報を設定する。
+		描画領域についてのすべての情報は、個々の子BOXオブジェクトのメンバ変数に保持されている。
+		具体的には、box._left_topと、box.height、box.widthの3つの変数である。つまり、このメソッドはこの情報を設定する。
 		"""
 		#基本値の取得
 		display_height = self.screen.get_height()	#スクリーンサーフェス全体の大きさ
@@ -274,20 +265,25 @@ class Root_Container:
 		#算出に必要な値の算出
 		height_for_dynamic_dividing = display_height - prefixed_height_sum	#動的に分割可能な高さ
 		average_height_for_dividing = int (height_for_dynamic_dividing * (float(average_height_percentage) / 100))	#動的に分割される高さの値
+
 		#すべての子ボックスオブジェクトに対して描画領域の設定
 		left_top=(0,0)	#width,height
 		for child_box in self.child_box_list :
-			"""#Boxコンテナなら、内部のサイズ情報の算出
+			"""#Boxコンテナなら、内部の静的サイズ情報の算出
 			if isinstance(child_box,Container_Box) :
 				child_box.calc_size()
 			"""
 			#動的な高さ、あるいは幅で定義された子BOXならば、高さ、幅の設定を行う
-			if child_box.width_prefix == False:
+			if child_box.height_prefix and not child_box.width_prefix :
+				#静的な高さと静的な幅
 				child_box.set_width(display_width)	#処理が必要になったらheight同様動的に分割
 				child_box.set_left_top((left_top[0],left_top[1]))
-			if child_box.height_prefix == False :
+			elif not child_box.height_prefix and not child_box.width_prefix :
+				#動的な高さと静的な幅
 				child_box.set_height(average_height_for_dividing)
 				child_box.set_left_top(left_top)
+			else :
+				raise Exception("未定義です")
 
 			left_top = (left_top[0],left_top[1]+child_box.get_height())
 
@@ -302,10 +298,11 @@ class Root_Container:
 		prefixed_height_sum = 0
 		num_of_dynamicheight_childbox = 0
 		for child_box in self.child_box_list :
-			if child_box.height_prefix == True :
+			if child_box.height_prefix :
 				prefixed_height_sum += child_box.get_height()
-			else:
+			else :
 				num_of_dynamicheight_childbox += 1
+
 		average_height_percentage = int(100 / (num_of_dynamicheight_childbox or 1))
 		return average_height_percentage , prefixed_height_sum
 
@@ -336,7 +333,7 @@ class Root_Container:
 		フォーカスのあるBOXを設定するセッターメソッド
 		"""
 		#与えられた引数のBOXが、今のフォーカスBOXと違うならば、処理をする。
-		if box != self.get_focused_box() :
+		if box is not self.get_focused_box() :
 			self.prefocused_box = self.get_focused_box()
 			self._focused_box = box
 			self.synchronize_button_state()

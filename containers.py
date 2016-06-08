@@ -84,6 +84,13 @@ class Contained(object):
 		#Set
 		self._container = container
 
+	def _remove_parent(self):
+		"""
+		親Containerオブジェクトのremoveメソッド呼び出しーとその成功ーにバウンドして呼び出される隠蔽されたメソッド。
+		このオブジェクトの親をNoneに再設定する。
+		"""
+		self._container = None
+
 	def get_parent(self):
 		return self._container
 
@@ -161,6 +168,17 @@ class Base_Container(Contained):
 		多様性のための冗長な隠蔽メソッド。
 		"""
 		raise Exception("オーバーライド必須です")
+
+	def remove(self,child):
+		"""
+		オーバーライド禁止。
+		定義された格納済みContainedオブジェクトーchildをこの格納オブジェクトから取り除く。
+		この多様性を隠蔽した、統一的メソッドは、現在有効なコンテナ型に対応する隠蔽されたメソッド_remove()を内部で呼び出す。
+		なお、引数Childに対するエラーチェックはその末端のメソッドで行う。
+		"""
+		self.test_valid_container_type()
+		self.get_valid_container_type()._remove(self,child)
+		Contained._remove_parent(child)
 
 	def test_child(self,child,implement_type=None):
 		"""
@@ -275,6 +293,7 @@ class Single_Container(Base_Container):
 		self._child = None
 
 	def set_child(self,content):
+		"""子containedオブジェクトを定義、格納する。"""
 		self.is_valid_container_type(Single_Container)
 		self.test_child(content)
 		self._child = content
@@ -282,7 +301,22 @@ class Single_Container(Base_Container):
 	_add = set_child	#隠蔽されたエイリアス。
 
 	def _get_children(self):
+		"""
+		コンテナ多様性のために隠蔽されたget_childrenメソッド。
+		Base_Containerのget_childrenから連鎖的に呼び出される。
+		"""
 		return self._child
+
+	def _remove(self,child):
+		"""
+		コンテナ多様性のために隠蔽されたremoveメソッド。
+		Base_Containerのremoveから連鎖的に呼び出される。
+		"""
+		if child is self._child :
+			self._child = None
+		else :
+			raise Exception("Single_Container: 引数Childはこのオブジェクトの子Containedオブジェクトでありません.")
+
 
 class Plural_Container(Base_Container):
 	"""
@@ -293,6 +327,7 @@ class Plural_Container(Base_Container):
 		self._children = []
 
 	def add_child(self,content):
+		"""子containedオブジェクトを新たに格納する"""
 		self.is_valid_container_type(Plural_Container)
 		self.test_child(content)
 		self._children.append(content)
@@ -300,7 +335,21 @@ class Plural_Container(Base_Container):
 	_add = add_child	#隠蔽されたエイリアス。
 
 	def _get_children(self):
+		"""
+		コンテナ多様性のために隠蔽されたget_childrenメソッド。
+		Base_Containerのget_childrenから連鎖的に呼び出される。
+		"""
 		return self._children
+
+	def _remove(self,child):
+		"""
+		コンテナ多様性のために隠蔽されたremoveメソッド。
+		Base_Containerのremoveから連鎖的に呼び出される。
+		"""
+		if child in self._children :
+			self._children.remove(child)
+		else :
+			raise Exception("Plural_Container: 引数Childはこのオブジェクトの子Containedオブジェクトでありません.")
 
 
 class Container_Of_Container(Base_Container):
@@ -321,7 +370,21 @@ class Container_Of_Container(Base_Container):
 	_add = add_container	#エイリアス
 
 	def _get_children(self):
+		"""
+		コンテナ多様性のために隠蔽されたget_childrenメソッド。
+		Base_Containerのget_childrenから連鎖的に呼び出される。
+		"""
 		return self._child_containers
+
+	def _remove(self,child):
+		"""
+		コンテナ多様性のために隠蔽されたremoveメソッド。
+		Base_Containerのremoveから連鎖的に呼び出される。
+		"""
+		if child in self._child_containers :
+			self._child_containers.remove(child)
+		else :
+			raise Exception("Container_Of_Container: 引数Childはこのオブジェクトの子Containedオブジェクトでありません.")
 
 
 if __name__ == '__main__' :
