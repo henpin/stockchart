@@ -83,7 +83,22 @@ Middle_Price_Color = (220,148,220)
 class BASE_BOX():
 	"""
 	BOXの基底クラス
+
+	:サイズ
+	Boxオブジェクトの"サイズ"とはwidth,height,の属性値のことであるが、この算出、設定のやり方には3つの種類がある。
+	--親静的なサイズ--
+	1,完全に静的なサイズ : オブジェクトの属性値width,heightはその初期化メソッドなどで単純に定義され、ここには動的性質は関わらない。
+	  換言すれば、親オブジェクトはこのサイズ情報についてなんら変更の権限を持たない。静的なサイズ情報
+	2,内部的に動的なサイズ : オブジェクト属性値width,heightはself.calc_height()によって動的に算出される。 
+	  なお、一方、親オブジェクトはこの動的に設定された内部サイズ情報の変更についてのいかなる権限ももたない。内部動的、親静的、なサイズ情報。
+	3,完全に動的なサイズ : そのサイズ情報の設定にに関するいかなる権限も、親オブジェクトに移譲する。
 	"""
+	def __init__(self,parent,box_id=None):
+		"""共通属性初期化メソッド"""
+		self._parent = parent	#親コンテナ
+		self._box_id = box_id	#Box_id:Boxの走査に用いる
+		self._width , self._height , self.left_top = 0,0,0	#絶対サイズ、座標、値
+
 	def get_rect(self):
 		"""このBoxに定義された描画領域を表すRectオブジェクトを返します。"""
 		left_top = self.get_left_top()
@@ -124,6 +139,22 @@ class BASE_BOX():
 		surface.fill(bgcolor)
 		return surface
 
+	def calc_height(self):
+		"""
+		動的な高さの算出を行うオプショナルメソッド。デフォルトでは何もしない。
+		このメソッドは、self.get_height()メソッドにバウンドして呼ばれ、
+		内部情報から動的にーRoot静的なー高さを算出することが期待される。
+		"""
+		pass
+
+	def calc_width(self):
+		"""
+		動的な幅の算出を行うオプショナルメソッド。デフォルトでは何もしない。
+		このメソッドは、self.get_width()メソッドにバウンドして呼ばれ、
+		内部情報から動的にーRoot静的なー高さを算出することが期待される。
+		"""
+		pass
+
 	def get_label_box(self,id_str) :
 		"""id_strで識別される、テキストの描画領域を提供するBOXオブジェクトを返します。"""
 		return self.get_father().get_label_box(id_str)
@@ -136,11 +167,16 @@ class BASE_BOX():
 		"""BOXサイズを表す(self.width,self.height)のタプルを返すだけ。"""
 		return (self._width , self._height)
 
-	def get_height(self):
-		return self._height
-
 	def get_width(self):
+		if self.width_prefix :
+			self.calc_width()
 		return self._width
+
+	def get_height(self):
+		"""高さを返すインターフェイス。「内部的に動的」な高さを算出するためにself.calc_height()を呼ぶ"""
+		if self.height_prefix :
+			self.calc_height()
+		return self._height
 
 	def get_left_top(self):
 		return self._left_top
@@ -224,7 +260,7 @@ class Root_Container:
 			if isinstance(child,Container_Box):
 				self.set_focused_box(child)
 			self.child_box_list.append(child)
-			self.update()
+			self.set_child_box_area()
 		else:
 			raise TypeError("不正なオブジェクト型の代入です。")
 
@@ -273,17 +309,17 @@ class Root_Container:
 			if isinstance(child_box,Container_Box) :
 				child_box.calc_size()
 			"""
-			#動的な高さ、あるいは幅で定義された子BOXならば、高さ、幅の設定を行う
-			if child_box.height_prefix and not child_box.width_prefix :
-				#静的な高さと静的な幅
-				child_box.set_width(display_width)	#処理が必要になったらheight同様動的に分割
+			#サイズ情報とleft_topの分配、設定を行う。
+			if child_box.height_prefix :
 				child_box.set_left_top((left_top[0],left_top[1]))
-			elif not child_box.height_prefix and not child_box.width_prefix :
-				#動的な高さと静的な幅
+			else :
+				#動的な高さの定義
 				child_box.set_height(average_height_for_dividing)
 				child_box.set_left_top(left_top)
-			else :
+			if child_box.width_prefix :
 				raise Exception("未定義です")
+			else :
+				child_box.set_width(display_width)	#処理が必要になったらheight同様動的に分割
 
 			left_top = (left_top[0],left_top[1]+child_box.get_height())
 
@@ -321,9 +357,9 @@ class Root_Container:
 
 	def get_label_box(self,id_str):
 		for box in self.child_box_list :
-			if isinstance(box,Label_box) and box.id_str == id_str :
+			if isinstance(box,Label_Box) and box.id_str == id_str :
 				return box
-		raise Exception("識別子",id_str,"を持ったLabel_boxオブジェクトは見つかりませんでした。")
+		raise Exception("識別子",id_str,"を持ったLabel_Boxオブジェクトは見つかりませんでした。")
 
 	def get_focused_box(self):
 		return self._focused_box
@@ -624,15 +660,21 @@ class Root_Container:
 				self.remaining_frame = 0
 
 
-class Label_box(BASE_BOX):
+class Label_Box(BASE_BOX):
 	"""
-	文字情報の描画を行うLabelオブジェクトにその描画領域を提供するオブジェクトで、また、その実際の描画命令も、このオブジェクトのdraw()メソッドから間接的に呼ばれることになる。
-	このオブジェクトに必要な高さ(確保しなくてはならない描画領域)は、このオブジェクトの有する子ラベルオブジェクトにより一意に決まり、これはset_own_height()メソッドにより動的に算出、設定される。
+	文字情報の描画を行うLabelオブジェクトにその描画領域を提供するオブジェクト
+	また、その実際の描画命令も、このオブジェクトのdraw()メソッドから間接的に呼ばれることになる。
+	このオブジェクトに必要な高さ(確保しなくてはならない描画領域)は、このオブジェクトの有する子ラベルオブジェクトにより一意に決まる
+	これは、具体的には、set_own_height()メソッドにより動的に算出、設定される。
 	"""
-	def __init__(self,parent,id_str=None) :
-		self._parent = parent	#逆参照に使う
+	def __init__(self,parent=None,id_str=None) :
+		id_str = id_str or "General"
+		BASE_BOX.__init__(self,parent,id_str)
+		self.init_attr()
+
+	def init_attr(self):
+		"""属性値の初期化"""
 		self.label_list = []	#子ラベルのリスト
-		self.id_str = id_str or "General"	#このオブジェクトの参照に用いられるID値
 		self.height_prefix = True	#このオブジェクトはデフォルトで静的な高さを有する。
 		self.width_prefix = False
 		self._left_top = (0,0)	#Root_Containerオブジェクトによって動的に決定されます。
@@ -3393,7 +3435,7 @@ def add_default_buttons(root):
 def add_default_labels(root):
 	"""
 	"""
-	label_box = Label_box(root)
+	label_box = Label_Box(root)
 	label1 = Label(str_color=(255,0,0))
 	label2 = Label("Hello StockChart",str_color=(0,0,255))
 	label_box.add_label(label1)
