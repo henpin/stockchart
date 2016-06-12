@@ -1,7 +1,10 @@
 #! /usr/bin/python
 #-*- coding: utf-8 -*-
 
-from containers import *
+import stockchart 
+
+"""
+"""
 
 
 class Tester(object):
@@ -103,6 +106,8 @@ class Tester(object):
 
 
 if __name__ == '__main__' :
+	print "containersのテストを開始します"
 	tester = Tester()
 	tester.test_all()
+	print "containersのテストが終了しました"
 

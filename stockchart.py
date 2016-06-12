@@ -52,10 +52,16 @@ TERM_LIST = "月足,週足,日足,前場後場,5分足,1分足".split(",")	#数�
 TERM_DICT = dict( zip( (TERM_LIST+range(1,7)),(range(1,7)+TERM_LIST) ) )	#相互参照の列挙体としての辞書。 1:月足 2:週足 3:日足 4:前後場足 5:五分足 6:一分足
 TERM2URL_DICT = {"日足":"1d","前場後場":"4h","5分足":"5min","1分足":"minutely"}
 #Local Files
-FONT_NAME =  os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"TakaoGothic.ttf")) else None 
-BOLD_FONT_NAME = os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf") if os.path.isfile( os.path.join(os.path.abspath(os.path.dirname(__file__)),"BoldFont.ttf")) else None 
-CSV_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)),"csv")
-HISTORY_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)),"history")
+#directories
+ABS_SOURCE_PATH = os.path.abspath(os.path.dirname(__file__))
+ABS_PROJECT_PATH = ABS_SOURCE_PATH
+FONT_PATH = os.path.join(ABS_PROJECT_PATH,"font")
+DATA_PATH = os.path.join(ABS_PROJECT_PATH,"data")
+CSV_DIR = os.path.join(ABS_PROJECT_PATH,"csv")
+#files
+FONT_NAME =  os.path.join(FONT_PATH,"TakaoGothic.ttf") if os.path.isfile(os.path.join(FONT_PATH ,"TakaoGothic.ttf")) else None
+BOLD_FONT_NAME = os.path.join(FONT_PATH,"BoldFont.ttf") if os.path.isfile(os.path.join(FONT_PATH,"BoldFont.ttf")) else None
+HISTORY_FILE = os.path.join(DATA_PATH,"history")
 #Download Modes
 DOWNLOAD_MODE_LOCAL = 1
 DOWNLOAD_MODE_AUTO = 2
