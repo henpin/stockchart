@@ -86,7 +86,7 @@ Middle_Price_Color = (220,148,220)
 
 
 #Class-----
-class BASE_BOX():
+class BASE_BOX(object):
 	"""
 	BOXの基底クラス
 
@@ -202,8 +202,26 @@ class BASE_BOX():
 	def get_parent(self):
 		return self._parent
 
+	def get_focused_box(self):
+		return self.get_father().get_focused_box()
 
-class Root_Container:
+	def is_focused(self):
+		return self.get_focused_box() is self
+
+	def get_display_surface(self):
+		return self.get_father().screen
+
+	def update(self,surface) :
+		"""新しいサーフェスを引数にとって、与えられた描画領域に再描画"""
+		rect = self.get_rect()
+		if rect.contains(surface.get_rect()) :
+			self.get_display_surface().blit(surface,rect)
+			pygame.display.update(rect)
+		else :
+			raise Exception("与えられたサーフェスがRootにより設定された絶対描画領域を超えます。")
+
+
+class Root_Container(object):
 	"""
 	このアプリケーションのインターフェイスと描画、メインループ及びイベント処理、のすべてを司るクラスです。
 
@@ -565,6 +583,10 @@ class Root_Container:
 		collide_box = self.get_collide_box(event.pos)
 		if collide_box is not None :
 			collide_box.process_MOUSEBUTTONDOWN(event)
+		#フォーカスの変更
+		if isinstance(collide_box,Container_Box) and collide_box is not self.get_focused_box() :
+			self.set_focused_box(collide_box)
+			self.update()
 
 	def process_MOUSEDRAG(self,event):
 		"""
@@ -741,6 +763,7 @@ class Label(object):
 	def __init__(self,string=None,str_color=None,font=None) :
 		self.font = font or pygame.font.Font(FONT_NAME,14)	#文字の描画に用いられるフォント
 		self.initial_string = "セッティングにはKEYを押してください。"	#文字列非設定時のデフォルト値
+
 		self.str_color = str_color or (0,0,0)
 		self.string = string or self.initial_string	#実際に描画される文字列
 		self.height = 0	#フォントサイズから動的に決定される
@@ -778,7 +801,8 @@ class Container_Box(BASE_BOX):
 	コンテンツ : このクラスはただ1つの、Stock_Chartオブジェクトをはじめとする株価データを保持するオブジェクトを、その「コンテンツ」として有し、そのチャートオブジェクトに対して描画領域を提供します。
 	"""
 	def __init__(self,parent,content=None,font=None) :
-		self.set_parent(parent)
+		BASE_BOX.__init__(parent)
+		#Contaiersモジュールに完全に置き換え
 		if content is not None:
 			#単純なコンテンツBoxとして機能
 			self.child_box_list = None
@@ -790,17 +814,15 @@ class Container_Box(BASE_BOX):
 			self._content = None
 		self.font = font or pygame.font.Font(FONT_NAME,13)
 		self.bold_font = pygame.font.Font(BOLD_FONT_NAME,13)
+		self.init_attr()
+
+	def init_attr(self):
+		"""属性値の初期化"""
 		self.height_prefix = False	#動的な大きさか静的な大きさか。デフォルトは前者。
 		self.width_prefix = False
 		self._width = 0
 		self._height = 0		
 		self._left_top = (0,0)	#この値はRoot_Containerオブジェクトによってのみ設定可能
-
-	def get_left_top_on_root(self):
-		"""
-		ルートウィンドウにおけるこのBOXのX,ｙの位置。
-		"""
-		return self._left_top
 
 	def set_content(self,content) :
 		"""
@@ -843,19 +865,14 @@ class Container_Box(BASE_BOX):
 		"""
 		rect_on_root = self.get_rect()
 		surface = self.get_surface()
-		if self.get_father().get_focused_box() == self:
+		if self.is_focused() :
+			#フォーカスがあるならハイライト表示
 			rect_for_self = pygame.Rect((0,0),rect_on_root.size)
 			pygame.draw.rect(surface,(255,200,40),rect_for_self,5)
 		self.get_content().draw(surface,self.font,self.bold_font)
-		self.get_father().screen.blit(surface,rect_on_root)
-		pygame.display.update(rect_on_root)
+		self.update(surface)
 
 	def process_MOUSEBUTTONDOWN(self,event):
-		#フォーカスの変更
-		focused = self.get_father().get_focused_box()	#クリック前のフォーカスBOX
-		if focused != self:
-			self.get_father().set_focused_box(self)	#フォーカスBOXの変更
-			focused.draw()	#フォーカスされていたBOXを再描画(フォーカス表示の解除のため)
 		#コンテンツにイベント処理を伝搬
 		self.get_content().process_MOUSEBUTTONDOWN(event)
 
@@ -878,11 +895,13 @@ class Button_Box(BASE_BOX):
 	このBOXオブジェクトがイベントシグナルないし描画の呼び出しを受けたときは、このオブジェクトの有するボタンオブジェクト、すなわち、self.button_listリストに登録されているすべてのUI_Buttonオブジェクトの、draw()メソッドをそれぞれ呼び出し、実際に描画します。
 	"""
 	def __init__(self,parent,id_str,font=None,bgcolor=None):
+		BASE_BOX.__init__(self,parent,id_str)
 		self.bgcolor = bgcolor or BACKGROUND_COLOR
-		self.set_parent(parent)
-		self.button_list = []
 		self.font = font or pygame.font.Font(FONT_NAME,14)
-		self.id_str = id_str
+
+	def init_attr(self):
+		"""属性値の初期化"""
+		self.button_list = []
 		self.height_prefix = True
 		self.width_prefix = False
 		self._width = 0		#拡張用
@@ -899,10 +918,10 @@ class Button_Box(BASE_BOX):
 		"""
 		return iter(self.get_all_buttons())
 	
-	def add_button(self,button_object):
-		if isinstance(button_object,(Content_of_ButtonBox)):
-			self.button_list.append(button_object)
-			button_object.set_parent_box(self)
+	def add_button(self,button):
+		if isinstance(button,(Content_of_ButtonBox)):
+			self.button_list.append(button)
+			button.set_parent_box(self)
 		else:
 			raise TypeError("不正なオブジェクトの代入です。")
 
@@ -936,19 +955,18 @@ class Button_Box(BASE_BOX):
 		#ボタンの描画
 		for button in self.get_all_buttons() :
 			#ハイライト表示に関する制御
-			if highlight and highlight is button :
+			if highlight is button :
 				button.draw(surface,left_top,self.font,highlight=True)
 			else :
 				button.draw(surface,left_top,self.font)
 			#描画位置(左上)のシフト
 			left_top = (left_top[0]+button._width+self.MARGINE,left_top[1])
-		self.get_father().screen.blit(surface,rect)
-		pygame.display.update(rect)	
+		self.update(surface)
 
 	def process_MOUSEBUTTONDOWN(self,event):
 		if event.button == 1 :
 			relative_pos = self.convert_pos_to_local(event.pos)	#Box相対座標
-			for button in self.button_list :
+			for button in self :
 				if button.collide_point(relative_pos):
 					button.process_MOUSEBUTTONDOWN(event)
 					self.draw()
@@ -960,7 +978,7 @@ class Button_Box(BASE_BOX):
 		一般的に行われるべき処理はボタンのハイライト描画のための処理です。
 		"""
 		relative_pos = self.convert_pos_to_local(event.pos)	#BOX相対座標値へ変換
-		for button in self.get_all_buttons() :
+		for button in self :
 			if button.collide_point(relative_pos) :
 				button.process_MOUSEMOTION(event)
 				#ボタンのハイライト描画に関するリフレッシュ処理。
@@ -985,6 +1003,7 @@ class Content(object):
 		return self._parent_box
 	
 	def set_parent_box(self,parent):
+		assert isinstance(parent,BASE_BOX)
 		self._parent_box = parent
 
 
@@ -1111,6 +1130,8 @@ class UI_Button(Content_of_ButtonBox):
 		"""
 		状態同期の為の関数の定義の為のインターフェイス。
 		"""
+		if not callable(func):
+			raise TypeError("引数が不正です")
 		self.synchronize_with_focuse_content = func
 
 	def call_synchro_function(self):
@@ -1146,7 +1167,7 @@ class UI_Button(Content_of_ButtonBox):
 		self.get_parent_box().draw()
 
 
-class No_Swith_Button(UI_Button):
+class No_Switch_Button(UI_Button):
 	"""
 	このオブジェクトはUI_Buttonの派生オブジェクトで、UI_Buttonオブジェクトと違い、「状態」の概念を持たないボタンです。
 	つまり、ON,OFFの状態が付随しない、ファンクショナルなボタンを表現します。
@@ -1177,8 +1198,8 @@ class Toggle_Button(UI_Button):
 	def __init__(self,states,id_str,command):
 		"""
 		"""
-		if not isinstance(states,(list,tuple)) :
-			raise Exception("引数が不正です。")
+		if not isinstance(states,tuple) :
+			raise TypeError("引数が不正です。")
 		elif len(states) <= 2 :
 			raise Exception("リストメンバ数が不十分です。")
 
@@ -1211,7 +1232,7 @@ class Toggle_Button(UI_Button):
 		引数に与えられたindex値としてのstate値の表現する「状態」を、表現する文字列を返す。
 		なお、index値は省略可能で、その時には、現在の「状態」を表す文字列を返す。
 		"""
-		if index != None and 0 <= index < len(self.states) :
+		if index is not None and 0 <= index < len(self.states) :
 			return self.states[index]
 		else :
 			return self.states[self.state]
@@ -1244,12 +1265,16 @@ class Toggle_Button(UI_Button):
 
 class Tab(object):
 	"""
-	このオブジェクトは、コンテナボックスをまたいで、コンテンツをまとめるためのオブジェクトで、同じタブを有するコンテンツは、内部で同じデータを共有する。
+	このオブジェクトは、コンテナボックスをまたいで、コンテンツをまとめるためのオブジェクト
+	同じタブを有するコンテンツは、内部で同じデータを共有する。
 
 	また、GUIにおけるTAB機能も提供する。
 	"""
 	def __init__(self):
 		self.data_dict = {}
+
+	def __iter__(self):
+		return iter(self.data_dict.keys())
 
 	def get_data_list(self):
 		return self.data_dict.keys()
@@ -1267,10 +1292,8 @@ class Tab(object):
 		"""
 		指定のデータが保存されいるかどうかを確認するためのメソッドです
 		"""
-		if self.data_dict.has_key(data) :
-			return True
-		else :
-			return False
+		return self.data_dict.has_key(data)
+
 
 class Horizontal_Ruler(object):
 	"""
@@ -1298,16 +1321,18 @@ class Horizontal_Ruler(object):
 		引数として与えられたサーフェスに直接描画する
 		このメソッドの呼び出し元は、このメソッド終了後、サーフェスをY軸方向にフリップするのでテキストは予めフリップしておく必要がある
 		"""
-		drawing_height = self.parent.price_to_height(self.price)
+		#描画に関する座標値の算出と、フォントのレンダリング
+		height_for_line = self.parent.price_to_height(self.price)
 		price_renderd = font.render(unicode(str(self.price),"utf-8"),True,FOREGROUND_COLOR)
 		flipped = pygame.transform.flip(price_renderd,False,True)
-		drawing_price_renderd_H = drawing_height - (price_renderd.get_height()/2)
-		drawing_rect = pygame.Rect((0,drawing_price_renderd_H),price_renderd.get_size())
+		height_for_rendered = height_for_line - (price_renderd.get_height()/2)
+		#価格表示部分の描画領域の保存
+		drawing_rect = pygame.Rect((0,height_for_rendered),price_renderd.get_size())
 		self.set_drawing_rect(drawing_rect,surface.get_height())	#描画範囲の保存
-
-		pygame.draw.line(surface,self.color,(0,drawing_height),(surface.get_width(),drawing_height),2)
+		#描画
+		pygame.draw.line(surface,self.color,(0,height_for_line),(surface.get_width(),height_for_line),2)
 		pygame.draw.rect(surface,self.color,drawing_rect,0)
-		surface.blit(flipped,(0,drawing_price_renderd_H))
+		surface.blit(flipped,(0,height_for_rendered))
 
 	def set_drawing_rect(self,rect,surface_height):
 		"""
@@ -1315,8 +1340,8 @@ class Horizontal_Ruler(object):
 		実際に描画されるサーフェスは、フリップされたものなので、それに適合させるための変換処理を行う
 		"""
 		if not isinstance(rect,pygame.Rect) :
-			raise Exception("不正な型です")
-
+			raise TypeError("不正な型です")
+		#フリップに関する座標値の反転処理
 		left_top = (0,surface_height - rect.bottomleft[1])
 		transformed_rect = pygame.Rect((left_top),rect.size)
 		self._drawing_rect = transformed_rect
@@ -1339,13 +1364,10 @@ class Horizontal_Ruler(object):
 		与えられたposとこのオブジェクトの価格表示領域が衝突しているか否かを返す
 		"""
 		rect = self.get_drawing_rect()
-		if rect.collidepoint(pos) :
-			return True
-		else :
-			return False
+		return rect.collidepoint(pos)
 
 
-class Price_Converter:
+class Price_Converter(object):
 	"""
 	あるStockChartオブジェクトに格納されたデータを変換、静的に保持する為のオブジェクト。なお、そのデータの描画も担当する。
 	この子クラスのオブジェクトは、calc()の呼び出しによってそのデータの算出を行い、draw()によってそのデータをグラフィカルに表現します。
@@ -1365,7 +1387,7 @@ class Price_Converter:
 		親Stock_Chartオブジェクト、描画に用いるRGB値、可視不可視についての設定。
 		"""
 		if not isinstance(parent,Stock_Chart) :
-			raise Exception("親がStock_Chartオブジェクトでありません")
+			raise TypeError("親がStock_Chartオブジェクトでありません")
 		self.parent = parent	#親のStock_Chartオブジェクト
 		self.color = color 
 		self.visible = visible
@@ -1422,10 +1444,10 @@ class Price_Converter:
 		#データの検証。
 		def throw_error(string):
 			raise Exception(string)
-		len(self.get_parent().get_price_data()) == len(datalist) or \
+		if len(self.get_parent().get_price_data()) != len(datalist) :
 			throw_error("リストの長さは親オブジェクトと同一でなくてはなりません")
-		check_int = ( lambda val : isinstance(val,int) or throw_error("与えられたデータにint値以外が含まれています") )
-		[ check_int(data) for data in datalist ]	#すべてのdataに対してcheck_int関数を通す
+		if not all( isinstance(val,int) for val in datalist ) :
+			throw_error("与えられたデータにint値以外が含まれています")
 
 		#データリストの格納
 		self.datalist = datalist
@@ -1447,13 +1469,14 @@ class Price_Converter:
 		"""
 		if not self.is_visible() :
 			return False
-		start , end = self.parent.get_drawing_index()
+		parent = self.get_parent()
+		start , end = parent.get_drawing_index()
 		datalist = self.get_datalist()
 		if not datalist :
 			raise Exception("データリストが未定義です。")
-		parent = self.get_parent()
+
 		#描画範囲に含まれるすべての移動平均日において、その移動平均値が0でないならpoint_listに格納
-		f = ( lambda  index,price : ( parent.get_index2pos_x(index) , int(round(parent.price_to_height(price))) ) )
+		f = ( lambda index,price : ( parent.get_index2pos_x(index) , int(round(parent.price_to_height(price))) ) )
 		point_list = [ f(index,datalist[index]) for index in range(start,end+1) if datalist[index] ]
 		#プロットポイントの描画
 		if self.plot_visible :
@@ -1470,6 +1493,7 @@ class Price_Converter:
 		"""
 		candle_width , Nouse = self.get_parent().get_drawing_size()
 		point_size = int( float ( candle_width / 2 ) )
+		#描画
 		for point in point_list :
 			pygame.draw.circle(surface,self.color,point,point_size)
 
@@ -1507,23 +1531,25 @@ class Moving_Average(Price_Converter):
 		parent = self.get_parent()
 		price_list = parent.get_price_data()
 		target_index = self.parent.pricetype2index(self.price_type)	#定義された価格タイプを表すprice_listにおけるindex値
-		f = ( lambda x : MAlist.append(0) )	#一時関数。無効な値としてindex値に対応させておくためのユーティリティ
+		#一時関数
+		append_zero = ( lambda : MAlist.append(0) )	#index値を同期するために無効な値として0を追加
+		extract_price = ( lambda ls : ls[target_index] )	#価格値のリストから対象価格タイプを抽出
+
 		#移動平均値の算出。算出可能なのは、index値が少なくともself.days以上の時。
-		for list_index in range(0,len(price_list)+1) :
-			if list_index <= self.days :
-				#price_listとindex値を完全に同期する為に0を加えておく
-				f(0)
+		for index in range(len(price_list)+1) :
+			if index <= self.days :
+				append_zero()	#price_listとindex値を完全に同期する為に0を加えておく
 			else :
-				start , end = list_index-self.days+1 , list_index
-				#今のlist_indexからself.days前までにおける、(0でない)(定義された価格種類の)価格値を集計する。
-				moving_prices = [ a_price_list[target_index] for a_price_list in price_list[start:end+1] if a_price_list[target_index] ]
+				start , end = index-self.days+1 , index
+				#今のindexからself.days前までにおける、(0でない)(定義された価格種類の)価格値を集計する。
+				moving_prices = [ extract_price(price_ls) for price_ls in price_list[start:end+1] if extract_price(price_ls)]
 
 				#最低限の要素を満たしているかチェックした後、移動平均値の算出
 				if len( moving_prices ) >= self.least_days :
 					moving_average = float( sum(moving_prices) ) / len(moving_prices)
 					MAlist.append( round(moving_average) )
 				else :
-					f(0)	#無効な値として0を格納しておく。
+					append_zero()	#無効な値として0を格納しておく。
 		self.MAlist = tuple(MAlist)
 
 
@@ -1546,11 +1572,13 @@ class Actual_Account_Analyser(Price_Converter):
 		実質的価値を表現する値の算出と格納を行うメソッド。
 		ここで生成されるデータリストAAlistのindex値は、親Stock_Chartオブジェクトにおけるstock_price_listにおけるindex値に完全に対応する。
 		"""
+		if not all( isinstance(MA,Moving_Average) for MA in MAlist ) :
+			raise TypeError("引数は移動平均オブジェクトでなければなりません")
 		AAlist = []
 		endindex = len(self.get_parent().get_price_data())
-		numof_MA = len(MAlist)
+
 		for index in range(endindex+1) :
-			MA_values = [ MAlist[i].get_value(index) for i in range(numof_MA) if MAlist[i].get_value(index) ]
+			MA_values = [ MA.get_value(index) for MA in MAlist if MA.get_value(index) ]
 			numof_val = len(MA_values)
 			if numof_val >= self.least_numof_MA :
 				actual_account_price = sum(MA_values) / float(numof_val)
@@ -1579,21 +1607,25 @@ class Middle_Price_Analyser(Price_Converter):
 		"""
 		MPlist = []
 		parent = self.get_parent()
+
 		for price_ls in parent.get_price_data() :
 			opning , closing = parent.get_opning_closing_price(price_ls)
 			high , low , Nouse = parent.get_price_range(price_ls)
-			#無効な値の検出。
-			if [ price for price in price_ls if not price ] :
+
+			#中間価格は算出不能
+			if not all( price for price in (opning,closing,high,low) ) :
 				middle_price = 0
+			#価格リストの中に無効な値がなければ、中間価格の算出
 			else :
 				#価格補正あり
 				if self.compensation :
-					#陽足なら
+					#陽足
 					if closing >= opning :
 						middle_price = ( high + opning ) / 2
-					#陰足ならば
+					#陰足
 					elif opning >= closing :
 						middle_price = ( opning + low ) / 2
+				#価格補正なし
 				else :
 					middle_price = ( opning + closing ) / 2
 			MPlist.append(middle_price)
@@ -3041,7 +3073,7 @@ class Stock_Chart(Content):
 		"""
 		#水平ルーラーにコライドしているのならフラグを上げる
 		for ruler in self.horizontal_rulers :
-			parent_lefttop_onroot = self.get_parent_box().get_left_top_on_root()
+			parent_lefttop_onroot = self.get_parent_box().get_left_top()
 			pos = (event.pos[0]-parent_lefttop_onroot[0],event.pos[1]-parent_lefttop_onroot[1])
 			if ruler.collide(pos) :
 				self.focused_horizontal_ruler = ruler
@@ -3415,7 +3447,7 @@ def add_default_buttons(root):
 			if button_type == TYPE_NORMAL :
 				button = UI_Button(id_str,id_str,bind_func)
 			elif button_type == TYPE_NOSWITCH :
-				button = No_Swith_Button(" "+id_str+" ",id_str,bind_func)
+				button = No_Switch_Button(" "+id_str+" ",id_str,bind_func)
 			elif button_type == TYPE_TOGGLE :
 				button = Toggle_Button(states[0],id_str,bind_func)
 			if synchro_func :
