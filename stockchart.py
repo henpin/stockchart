@@ -1700,11 +1700,23 @@ class Stock_Chart(Content):
 	def __init__(self,security_code,term_num,download_mode,site=DOWNLOAD_SITE_ETC):
 		"""
 		"""
-		#株価情報についてのメンバ変数
 		Content.__init__(self)
-		self.stock_price_list = []	#ダウンロードされた株価情報。fetch_csv()メソッドにより入力
+		self.init_attr()	#メンバ変数の初期化
+
+		#株価情報についてのメンバ変数
 		self.security_code = security_code	#証券コード文字列
 		self.security_name = ""	#証券名。CSVのフェッチと保存の際に設定される
+		#データの保存とフェッチに関するメタ情報を格納するメンバ変数
+		self.download_mode = download_mode	#ローカル環境に株価データがあればそれを用いる
+		self.download_site = site
+		#静的な値の初期化設定メソッド
+		self.set_term(term_num)	#２つのterm変数のセッターメソッド
+		self.set_zoom_scale()	#ズームスケールのデフォルト値の設定
+
+	def init_attr(self):
+		"""属性値の初期化メソッド"""
+		#株価情報についてのメンバ変数
+		self.stock_price_list = []	#ダウンロードされた株価情報。fetch_csv()メソッドにより入力
 		self.term_for_a_bar = None	#５分足、１０分足、日足、週足、月足のいずれの情報か
 		self.term_for_csv = None	#週足、月足、は日足CSVデータから算出するため、CSVファイルの実態は日足データとなる
 
@@ -1725,20 +1737,12 @@ class Stock_Chart(Content):
 		self.horizontal_rulers = []	#価格を表す水平ルーラーのリスト
 		self.moving_averages = []	#移動平均オブジェクトのリスト
 		self.AA_analyser = None		#実質的価値の解析オブジェクト
-
-		#データの保存とフェッチに関するメタ情報を格納するメンバ変数
-		self.download_mode = download_mode	#ローカル環境に株価データがあればそれを用いる
-		self.download_site = site
 		self.file_header = []	#ローカルファイルに保存するためのファイルヘッダ
 
 		#イベントに関するフラグ変数
 		self.focused_horizontal_ruler = None #Horizontal_Rulerオブジェクトが格納される
 
-		#静的な値の初期化設定メソッド
-		self.set_term(term_num)	#２つのterm変数のセッターメソッド
-		self.set_zoom_scale()	#ズームスケールのデフォルト値の設定
-
-	def initialize_data(self,reload_data=False):
+	def initialize_data(self,reloading=False):
 		"""
 		動的なデータに関する初期化処理。
 		__init__メソッドでは呼び出しが行われない。
@@ -1757,7 +1761,7 @@ class Stock_Chart(Content):
 			self.set_tab(tab)
 		#データのフェッチと格納
 		#タブにデータが存在すればそこから読み込み、なければフェッチする
-		if reload_data or not self.read_from_tab() :
+		if reloading or not self.read_from_tab() :
 			#データのフェッチに失敗すればFalseを返す
 			if not self.download_price_data() :
 				return False
@@ -1837,11 +1841,11 @@ class Stock_Chart(Content):
 		"""
 		if dummy :
 			raise Exception("引数は明示的に宣言してください")
-		if start != None :
+		if start is not  None :
 			if not ( 0 <= start <= len(self.get_price_data()) ) :
-				raise Exception("引数が不正です")
+				raise Exception("startは0~endまででなければなりません")
 			self._drawing_start_index = start
-		elif end :
+		elif end is not None :
 			if end >= len(self.stock_price_list) :
 				raise Exception("endが大き過ぎます")
 			self._drawing_end_index = end
@@ -1859,9 +1863,11 @@ class Stock_Chart(Content):
 		self.stock_price_listのセッターメソッド。
 		drawing_indexの設定もここで行う。
 		"""
-		if isinstance(data,(list,tuple)) and data :
+		if isinstance(data,(list,tuple)) and data and all(isinstance(item,(list,tuple)) for item in data) :
 			self.stock_price_list = tuple(data)
 			self.set_drawing_index( end = len(data)-1 )
+		else :
+			raise Exception("株価データは株価のリストのリストでなければなりません")
 
 	def get_price_data(self):
 		return self.stock_price_list
@@ -1875,32 +1881,35 @@ class Stock_Chart(Content):
 		つまるところ、このメソッドは、ダウンロードモード及びリソース先の分岐の選択から、実際のデータのフェッチ、変換、確認、格納、あるいはTABへの動機、ひいては日足の週足への変換まで、データの直接的な設定に関するおおよその処理のほとんどすべての面倒を見ます
 		"""
 		#定義されたダウンロードモードに基づく処理の分岐
-		if self.download_mode == DOWNLOAD_MODE_LOCAL :
-			#ローカルモード
-			if not self.download_price_data_from_file() :
-				return False
-		elif self.download_mode == DOWNLOAD_MODE_AUTO :
-			#オートモード:ローカルにファイルがあればそのデータを使い、さもなくばフェッチする。
+		#ローカルモード
+		if self.download_mode is DOWNLOAD_MODE_LOCAL :
+			result = self.download_price_data_from_file() :
+
+		#オートモード:ローカルにファイルがあればそのデータを使い、さもなくばフェッチする。
+		elif self.download_mode is DOWNLOAD_MODE_AUTO :
 			if self.exist_stock_price_file() :
-				if not self.download_price_data_from_file() :
-					return False
+				result = self.download_price_data_from_file() :
 			else :
-				if not self.download_price_data_from_web() :
-					return False
-		elif self.download_mode == DOWNLOAD_MODE_DIFF :
-			#差分ダウンロード:ファイルが存在し、且つ最新の状態ならそれを用い、さもなくばwebからダウンロード。
+				result = self.download_price_data_from_web() :
+
+		#差分ダウンロード:ファイルが存在し、且つ最新の状態ならそれを用い、さもなくばwebからダウンロード。
+		elif self.download_mode is DOWNLOAD_MODE_DIFF :
 			if self.exist_stock_price_file(check_latest=True) :
-				if not self.download_price_data_from_file() :
-					return False
+				result = self.download_price_data_from_file() :
 			else :
-				if not self.download_price_data_from_web() :
-					return False
-		elif self.download_mode == DOWNLOAD_MODE_DOWNLOAD :
-			#強制ダウンロードモード。
-			if not self.download_price_data_from_web() :
-				return False
+				result = self.download_price_data_from_web() :
+
+		#強制ダウンロードモード。
+		elif self.download_mode is DOWNLOAD_MODE_DOWNLOAD :
+			result = self.download_price_data_from_web() :
+
+		#エラー
 		else :
 			raise Exception("未定義のモードです")
+
+		#ダウンロード結果の確認。データを正常に取得できなかったら処理を中断
+		if not result :
+			return False
 
 		self.synchro_with_tab()	#tabに同期
 		#週足、月足についてはtabを介して変換されたデータを得る。
@@ -1924,9 +1933,9 @@ class Stock_Chart(Content):
 			return False
 		#ファイル名の生成と読み込み、変換。
 		filename = self.convert_self_to_filename()
-		fileobj = open(filename,"r")
-		csv_text = fileobj.read()
-		fileobj.close()
+		with open(filename,"r") as fileobj :
+			csv_text = fileobj.read()
+
 		price_list = []
 		if not self.convert_csv_data(csv_text,price_list,from_file=True):
 			return False	#csvの変換の失敗
@@ -1944,7 +1953,7 @@ class Stock_Chart(Content):
 			epoctime = os.stat(self.convert_self_to_filename()).st_mtime
 			date = Date.fromtimestamp(epoctime)
 			today = Date.today()
-			return today == date
+			return date == today
 		else :
 			return existing
 	
@@ -1959,7 +1968,7 @@ class Stock_Chart(Content):
 		"""
 		オンラインからのデータのフェッチのための中間インターフェイス。諸所のサイトにおける種差はここで吸収する。
 		"""
-		if self.download_site == DOWNLOAD_SITE_KDB :
+		if self.download_site is DOWNLOAD_SITE_KDB :
 			if not self.download_price_data_from_kdb() :
 				return False
 		else :
@@ -1982,12 +1991,12 @@ class Stock_Chart(Content):
 				url_list.append(url)
 		else :
 			url_list = self.get_urls(self.term_for_csv)
-			if url_list == False :
+			if not url_list :
 				tkMessageBox.showerror(message="kdb.comについて、分足のデータに関するurlの自動補足ができませんでした。")
 				return False
 		#CSVのフェッチとコンバート、保存を行い、何らかのエラーが出た時にはFalseを返す。
 		price_list = []
-		for url in url_list:
+		for url in url_list :
 			csv_text = self.fetch_csv(url)
 			if not ( csv_text and self.convert_csv_data(csv_text,price_list) ) :
 				return False	#CSVテキストが異常か、その変換に失敗した
@@ -2013,17 +2022,20 @@ class Stock_Chart(Content):
 			print e.reason	#デバッグプリント
 			tkMessageBox.showerror(message="CSVのダウンロードに失敗しました。")
 			return False
-		#hTML文章のパーシング
-		parser = Get_Url_Parser()
+		#HTML文章のパーシング
+		parser = Url_Parser()
 		date_list = parser.get_dates(respose.read())
-		if len(date_list) == 0 :
+		if not date_list:
 			return False
+
 		#urlの動的生成
-		url_list = []
-		for date in date_list :
-			format_date = "2016-%s" % (date.replace("/","-"))
+		def generate_url_from_date(date_str):
+			assert isinstance(date_str,str)
+			formatted_date = "2016-%s" % (date.replace("/","-"))
 			url = "%s?date=%s&download=csv" % (base_url,format_date)
-			url_list.append(url)
+			return url
+
+		url_list = [ generate_url_from_date(date) for date in date_list ]
 		return url_list
 
 	def synchro_with_tab(self):
@@ -2159,7 +2171,7 @@ class Stock_Chart(Content):
 			str_list = [price_list[0]] + (map (str,price_list[1:]))
 			fileobj.write(",".join(str_list)+"\n")
 		fileobj.close()
-		print "Download and Save : ",filename
+		print "Download and Save : %s" % (filename)
 
 	def convert_daily_to_weekly(self):
 		"""
@@ -2174,6 +2186,7 @@ class Stock_Chart(Content):
 		tmp_list = []
 		daily_list = self.stock_price_list
 		turnover_index , amount_index = self.pricetype2index("T") , self.pricetype2index("A")
+		#日足データの日時が月曜ならそれから5日間分のデータを集積して、リストに追加。
 		for index in range(0,len(daily_list)) :
 			date = self.get_date2int_list(index)	#[year,month,day]のリスト
 			if Date(date[0],date[1],date[2]).weekday() == 0 :	#月曜なら
@@ -2181,8 +2194,8 @@ class Stock_Chart(Content):
 				high , low , price_range = self.get_price_range(tmp_list)
 				opning , closing = self.get_opning_closing_price(tmp_list)
 				date_str = "%s〜%s" % (tmp_list[0][0],tmp_list[-1][0][tmp_list[-1][0].find("-")+1:])
-				turnover = sum( [ ls[turnover_index] for ls in tmp_list] )
-				amount_ofmoney = sum( [ ls[amount_index] for ls in tmp_list] )
+				turnover = sum( ls[turnover_index] for ls in tmp_list )
+				amount_ofmoney = sum( ls[amount_index] for ls in tmp_list )
 				l = (date_str,opning,high,low,closing,turnover,amount_ofmoney)
 				weekly_price_list.append(l)
 
@@ -2199,9 +2212,9 @@ class Stock_Chart(Content):
 		monthly_price_list = []
 		tmp_list = []
 		daily_list = self.stock_price_list
-		pass
+		raise Exception("未実装です")
 
-	def set_Y_axis_fixed(self,boolean):
+	def set_Y_axis_fixed(self,boolean=True):
 		"""
 		このチャートのY軸の固定についての設定
 		"""
@@ -2302,7 +2315,7 @@ class Stock_Chart(Content):
 		now_x = self.left_side_padiing
 		for index in range(start_index,end_index+1) :
 			self._index_posX_table[index] = now_x
-			now_x += (candle_width/2  + padding + candle_width/2)
+			now_x += (candle_width/2+ padding+ candle_width/2)
 
 	def get_index2pos_x(self,index):
 		"""
@@ -2450,8 +2463,8 @@ class Stock_Chart(Content):
 		turnover_list = [ price_list[turnover_index] for price_list in self.stock_price_list[start:end+1] ]
 		#出来高の価格幅の算出
 		#出来高の基本参考値の算出。最近の0でない出来高値を参考値とする
-		f = ( lambda x : turnover_list[x] or f(x-1) )
-		high = low = f(-1)
+		recent_turnover = ( lambda index : turnover_list[index] or recent_turnover(index-1) )
+		high = low = recent_turnover(-1)
 		for turnover in turnover_list :
 			if turnover == 0 :
 				continue
@@ -2461,7 +2474,7 @@ class Stock_Chart(Content):
 				low =turnover
 		#convert_scale,price_to_heightの生成
 		turnover_range = high - low
-		convert_scale =  float(surface_size[0]) / turnover_range
+		convert_scale = float(surface_size[0]) / turnover_range
 		turnover_to_height = ( lambda price : round(( price * convert_scale ) - ( low * convert_scale )) )
 		#横線の描画
 		"""
@@ -2470,15 +2483,13 @@ class Stock_Chart(Content):
 			y = turnover_to_height(price)
 			pygame.draw.aaline(surface,(255,200,200),(0,y),(surface_size[0],y))
 		"""
-		#出来高の描画。self.stock_price_listのindex値とturnover_listのindex値を同期しながら大きくしていく。
-		now_index = start
+		#出来高の描画。
 		candle_width , padding = self.get_drawing_size()
-		for turnover in turnover_list :
-			x = self.get_index2pos_x(now_index)
+		for turnover,chart_index in enumerate(turnover_list,start) :
+			x = self.get_index2pos_x(chart_index)
 			height = turnover_to_height(turnover)
 			rect = pygame.Rect((x-(candle_width/2),0 ),(candle_width,height))
 			pygame.draw.rect(surface,(255,200,200),rect,candle_width)
-			now_index += 1
 
 		flipped = pygame.transform.flip(surface,False,True)
 		return flipped
@@ -2508,6 +2519,8 @@ class Stock_Chart(Content):
 		#高値、安値を表すindex値
 		high_index = self.pricetype2index("H")
 		low_index = self.pricetype2index("L")
+		extract_high = ( lambda ls : ls[high_index] )
+		extract_low = ( lambda ls : ls[low_index] )
 		#株価リストのリストなら
 		if isinstance(stock_price_list[0],(list,tuple)) :
 			#Y軸固定の場合、価格範囲はすべてのデータを対象とする。
@@ -2515,19 +2528,23 @@ class Stock_Chart(Content):
 				stock_price_list = self.stock_price_list
 			#基準となる高値、安値を得る。ただし不明値0だと困るのでforで0以外を探す
 			high_price , low_price = 0,0
-			for index in range(len(stock_price_list)-1,0,-1) :
+			for price_ls in stock_price_list[-1:0:-1] :
 				if not high_price :
-					high_price = stock_price_list[index][high_index]
+					high_price = extract_high(price_ls)
 				if not low_price :
-					low_price = stock_price_list[index][low_index]
+					low_price = extract_low(price_ls)
 				if high_price and low_price :
 					break
+			#breakされなかったばあい
+			else :
+				raise Exception("高値、あるいは安値が取得できませんでした。")
 			#高値と安値の算出
-			for price_list in stock_price_list :
-				if high_price < price_list[high_index] and price_list[high_index] < high_price * 5:
-					high_price = price_list[high_index]
-				if low_price > price_list[low_index] and price_list[low_index] > low_price / 5:
-					low_price = price_list[low_index]
+			for price_ls in stock_price_list :
+				high_inlist,low_inlist = extract_high(price_ls),extract_low(price_ls)
+				if ( high_price < high_inlist and high_inlist < high_price * 5 ) :
+					high_price = high_inlist
+				if ( low_price > low_inlist and low_inlist > low_price / 5 ) :
+					low_price = low_inlist
 		#単に株価リストなら
 		else :
 			high_price = stock_price_list[high_index]
@@ -2549,10 +2566,12 @@ class Stock_Chart(Content):
 			closing_price = stock_price_list[-1][closing_index]	#一番新しい株価の終値
 			return opning_price , closing_price
 		#単に株価のリストであれば
-		else :
+		elif all( isinstance(val,int) for val in stock_price_list ) and len(stock_price_list) >= closing_index :
 			opning_price = stock_price_list[opning_index]	#始値
 			closing_price = stock_price_list[closing_index]	#終値
 			return opning_price , closing_price
+		else :
+			raise TypeError("定義された株価リストが予期せぬ形式です")
 
 	def price_to_height(self,price):
 		"""
@@ -2585,19 +2604,24 @@ class Stock_Chart(Content):
 		3，ズームスケール
 		"""
 		surface = self.get_surface(surface_size)
-		additional_informations = []	#追加情報を表す文字列の一時リスト
 		padding = self.left_side_padiing
 		v_padding = self.vertical_padding
 		start_index , end_index = self.get_drawing_index()
-		start_date = self.stock_price_list[start_index][0].replace("-","/")	#描画している一番初めの日時
-		end_date = self.stock_price_list[end_index][0].replace("-","/")	#描画している一番最後の日時
+
 		#文字列の生成とadditional_informationsへの登録
+		additional_informations = []	#追加情報を表す文字列の一時リスト
+		#足期間
 		bar_term_str = unicode(TERM_DICT[self.term_for_a_bar],"utf-8")	#足期間
 		additional_informations.append(bar_term_str)
+		#描画期間
+		start_date = self.stock_price_list[start_index][0].replace("-","/")	#描画している一番初めの日時
+		end_date = self.stock_price_list[end_index][0].replace("-","/")	#描画している一番最後の日時
 		how_long_str = unicode("%s〜%s"%(start_date,end_date),"utf-8")	#表示期間についての情報
 		additional_informations.append(how_long_str)
+		#ズームスケール
 		zoom_scale_str = unicode("x%.1f"%(self.get_zoom_scale()),"utf-8")	#ズームスケール
 		additional_informations.append(zoom_scale_str)
+
 		#レンダリングとサーフェスの生成、描画
 		left = padding
 		for info_str in additional_informations:
@@ -2624,8 +2648,9 @@ class Stock_Chart(Content):
 				setting_informations.append((string,color))
 			#価格コンバータ
 			#価格コンバーターを引数にとって自動で色を算出、returnする一時関数
-			Color_Of_Converter = \
-				( lambda price_converter : price_converter.color if price_converter.is_visible() else FOREGROUND_COLOR )
+			Color_Of_Converter = ( lambda price_converter :
+				 price_converter.color if price_converter.is_visible() else FOREGROUND_COLOR
+				)
 			#MA
 			for MA in self.moving_averages :
 				days = "MA-%d" % (MA.days)
@@ -2651,13 +2676,15 @@ class Stock_Chart(Content):
 				rendered = font.render(unicode(string,"utf-8"),True,color)
 				right = right - ( rendered.get_width() + side_padding/2 )
 				surface.blit(rendered,(right,v_padding))
-		#Do Draw
+
+		#描画に関する値
 		v_padding = self.vertical_padding
 		side_padding = self.right_side_padding
 		height = font.size("あ")[1] + v_padding
 		surface = self.get_surface((surface_size[0],height))
 		right = surface_size[0] - side_padding
 
+		#Do Draw
 		setting_informations = regist_drawing_setting_info()
 		draw_info(reversed(setting_informations),right)
 
@@ -2683,12 +2710,14 @@ class Stock_Chart(Content):
 		"""
 		水平ルーラーのタイプを表現する文字列"H"/"L"/"M"を引数に、そのルーラータイプで定義されたHorizontal_Rulerオブジェクトを返します。
 		"""
-		if not ruler_type in ("H","L","M") :
+		if ruler_type not in ("H","L","M") :
 			raise Exception("不正な引数です")
+
 		for ruler in self.horizontal_rulers :
 			if ruler.type == ruler_type :
 				return ruler
-		raise Exception("指示された要素が見つかりませんでした")
+		else :
+			raise Exception("指示された要素が見つかりませんでした")
 
 	def set_horizontal_rulers_price(self,ruler_type,price):
 		"""
@@ -2703,13 +2732,16 @@ class Stock_Chart(Content):
 		ただし、描画するindex値から適当な価格を動的に算出するので、描画領域がすでに確定されている必要があります。
 		具体的には、描画範囲における最高値と最安値、また、最も最近の終値を表すルーラーを定義します。
 		"""
+		#設定に関する値
 		self.horizontal_rulers = []	#初期化
 		start , end = self.get_drawing_index()
 		high_price , low_price , price_range = self.get_price_range(self.stock_price_list[start:end])
 		last_day_closing_price = self.stock_price_list[-1][self.pricetype2index("C")]
+		#ルーラーオブジェクトの生成
 		high_ruler = Horizontal_Ruler(self,"H",high_price,(255,100,100))
 		low_ruler = Horizontal_Ruler(self,"L",low_price,(100,100,255))
 		close_ruler = Horizontal_Ruler(self,"M",last_day_closing_price,(100,255,100))
+		#ルーラーの登録
 		self.horizontal_rulers.append(high_ruler)
 		self.horizontal_rulers.append(low_ruler)
 		self.horizontal_rulers.append(close_ruler)
@@ -2735,11 +2767,11 @@ class Stock_Chart(Content):
 		low_ruler_price = self.get_horizontal_ruler("L").get_price()
 		average = float( high_ruler_price + low_ruler_price ) / 2
 		#Do setting
-		self.set_horizontal_rulers_price("M",float(average))
+		self.set_horizontal_rulers_price("M",round(average,1))
 	
 	def draw_coordinate_axis(self,surface_size,high_price,low_price,font):
 		"""
-		座標の線を引くメソッド。
+		座標の横線を引くメソッド。
 		適当な間隔を動的に算出して、描画したサーフェスを返す
 		引数には描画する線の高値値と安値値をとる。
 		"""
@@ -2751,15 +2783,34 @@ class Stock_Chart(Content):
 		convert_scale = self._convert_scale
 
 		#座標線のインターバル値、あるいははじめに引く最安座標線を切りのいい値にする。
-		while ( price_range >= 100 and axis_interval % 10 != 0 ) or ( price_range <= 100 and axis_interval % 2 != 0) :
-			axis_interval += 1
-		while ( low_price % axis_interval != 0) :
-			low_price += 1	#もはや安値は意味しない
-		for i in range(low_price,high_price+axis_interval,axis_interval) :
-			pos_y = self.price_to_height(i)
+		def calc_convenient_axis_interval(axis_interval) :
+			"""引数インターバルを基準に、ちょうどきりのいい値を算出"""
+			#axis_intervalがきりがいいか否か
+			is_convenient_axis_interval = ( lambda axis_interval :
+				( price_range >= 100 and axis_interval % 10 != 0 ) or ( price_range <= 100 and axis_interval % 2 != 0)
+				)
+			#キリがよければその値を返し、さもなくば値を1足して再起呼び出し
+			if is_convenient_axis_interval(axis_interval) :
+				return axis_interval
+			else :
+				return calc_convenient_axis_interval(axis_interval+1)
+
+		def calc_least_axis_price(price) :
+			"""インターバルで整除できる、priceを基準とした最小値"""
+			if price % axis_interval == 0 :
+				return price
+			else :
+				calc_least_axis_price(price+1)
+		#算出
+		axis_interval = calc_convenient_axis_interval(axis_interval)
+		least_axis_price = calc_least_axis_price(low_price)
+
+		#描画
+		for price in range(least_axis_price,high_price+1,axis_interval) :
+			pos_y = self.price_to_height(price)
 			pygame.draw.line(surface,FOREGROUND_COLOR,(0,pos_y),(surface_width,pos_y),1)	#横線
-			text_surface = font.render(str(i),True,FOREGROUND_COLOR)
-			text_size = font.size(str(i))
+			text_surface = font.render(str(price),True,FOREGROUND_COLOR)
+			text_size = font.size(str(price))
 			flipped_surface = pygame.transform.flip(text_surface,False,True)	#最後の座標の反転のため
 			surface.blit(flipped_surface,(surface_width-text_size[0],pos_y-text_size[1]))	#文字
 
