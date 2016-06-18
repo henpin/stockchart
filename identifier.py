@@ -49,6 +49,7 @@ class Identifier(object):
 		#IDホルダーが明示的に定義されなければ、グローバルIDホルダーがデフォルトで設定される.
 		#モジュールとしてimportされた時も、暗黙の名前解決処理でこのモジュール内スコープのグローバル変数GLOBAL_ID_HOLDERが参照される
 		self.id_holder = id_holder
+		assert isinstance(id_holder,ID_Holder)
 		self.id_holder.add(self)
 
 	def get_id(self):
