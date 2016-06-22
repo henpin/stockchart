@@ -2816,6 +2816,7 @@ class Stock_Chart(Content):
 
 		return pygame.transform.flip(surface,False,True)
 
+"""書き換え必須
 	def draw_y_axis(self,surface_size,font):
 		"""
 		日時を表す縦線描画のための中間インターフェイス。
@@ -2843,22 +2844,23 @@ class Stock_Chart(Content):
 		日足用の縦線描画
 		月単位で縦線を描く
 		"""
+		def is_beginning_day(date):
+			
+
 		if self.get_zoom_scale() >= 1.5 :
 			return self.draw_y_sessionly_axis(surface_size,font)
 		surface = self.get_surface(surface_size)
 		start_index , end_index = self.get_drawing_index()
+
 		for index in range(start_index,end_index+1) :
 			date = self.get_date2int_list(index)
 			if date[2] > 6 :	#日にち６までやる
 				continue
 			#月初めであるかどうかを判定;いずれかがTrueであればtestはパスである
 			#内容はindexが０であるか、あるいは１つ前のデータが「前の月」のものであるかどうかを判定する
-			test1 = (index == 0)
-			if index != 0 :
-				last_date = self.get_date2int_list(index-1)
-				last_date_next_month = last_date[1]+1 if last_date[1] != 12 else 1
-				test2 = (date[1] == last_date_next_month)
-			else :	test2 = False
+			last_date = self.get_date2int_list(index-1)
+			last_date_next_month = last_date[1]+1 if last_date[1] != 12 else 1
+			test2 = (date[1] == last_date_next_month)
 			#もし月の最も初めのデータであるならば描画
 			if test1 or test2 :
 				date_str = "%s/%s/%s" % (date[0],date[1],date[2])
@@ -2932,7 +2934,9 @@ class Stock_Chart(Content):
 
 	def get_date2int_list(self,index):
 		"""
-		与えられたindexで指示される株価データのリストについて、その日付を表す文字列を、評価用にint値に変換したもののリストを返す、ユーティリティ関数
+		与えられたindexで指示される株価データのリストについて、その日付を表す文字列を、
+		評価用にint値に変換したもののリストを返す、ユーティリティ関数
+
 		1,日足、前後場足は「年、月、日」のリスト。
 		2,週足はその足の表すはじめの日を表す、上のフォーマットをもったリスト。
 		3,分足は「年、月、日、時間、分」の形式のリスト。
@@ -2951,6 +2955,7 @@ class Stock_Chart(Content):
 			#分足については「Y,M,D,H,M」の５つの要素を返す
 			date_str_list = self.stock_price_list[index][0].replace(":","-").split("-")
 			return map ( int,date_str_list )
+"""
 
 	def pricetype2index(self,price_type):
 		"""
@@ -3008,7 +3013,7 @@ class Stock_Chart(Content):
 		ハイライト表示する要素のindex値の定義を行うインターフェイス。
 		"""
 		self._highlight_index = index
-		self.print_highlight_price_information()
+		self.print_highlight_price_information()	#更新
 
 	def set_highlight_center(self):
 		"""
@@ -3018,11 +3023,15 @@ class Stock_Chart(Content):
 		drawing_start , drawing_end = self.get_drawing_index()
 		num_of_candle = drawing_end - drawing_start
 
-		moving_val = (( center_index - drawing_start ) - ( drawing_end - center_index )) / 2
+		#index値の変更
+		moving_val = ( (center_index- drawing_start) - (drawing_end- center_index) ) / 2
 		drawing_end += moving_val
-		end_max = len(self.get_price_data())
-		if drawing_end >= end_max :
-			drawing_end = end_max
+
+		#最終indexを超えたら描画indexをそれに変更
+		end_index = len(self.get_price_data())
+		if drawing_end >= end_index :
+			drawing_end = end_index
+		#最初のindex0を超えたら描画indexをそれに変更
 		elif drawing_end - num_of_candle <= 0 :
 			drawing_end = num_of_candle + 1
 
@@ -3045,7 +3054,6 @@ class Stock_Chart(Content):
 		"""
 		endindex = self.get_drawing_index()[1]
 		self.set_highlight_index(endindex)
-		self.print_highlight_price_information()
 
 	def height_to_price(self,pos_y):
 		"""
@@ -3077,7 +3085,9 @@ class Stock_Chart(Content):
 		general_label_box = parent.get_label_box("General")
 		general_labels = general_label_box.label_list
 		general_labels[0].set_string("%s %s %s" % (self.security_code,self.security_name,date))
-		general_labels[1].set_string("高: %d  安: %d  始: %d  終: %d  出来高: %s  売買高: %s" % (high,low,opning,closing,turnover,kinngaku))
+		general_labels[1].set_string(
+		"高: %d  安: %d  始: %d  終: %d  出来高: %s  売買高: %s" % (high,low,opning,closing,turnover,kinngaku)
+		)
 		general_label_box.draw()
 
 	def move_highlight(self,val):
@@ -3095,9 +3105,16 @@ class Stock_Chart(Content):
 		"""
 		start , end = self.get_drawing_index()
 		chart_end = len(self.get_price_data())
-		if 0 <= start + val and end + val <= chart_end :
-			self.set_drawing_index(end = end+val)
-			self.set_highlight_index(self.get_drawing_index()[1])
+		#チャート範囲を超えた移動は補正を加えて設定
+		if start+ val < 0:
+			self.set_drawing_index(start=0)
+		elif chart_end < end + val:
+			self.set_drawing_index(end=chart_end)
+		#チャート範囲内なので単純に移動させる
+		else :
+			self.set_drawing_index(end=end+val)
+		#ハイライトindexの再設定
+		self.set_highlight_index_default()
 
 	def zoom_up(self,step=1):
 		"""
@@ -3106,7 +3123,7 @@ class Stock_Chart(Content):
 		"""
 		new_scale = self.get_zoom_scale() + ( step * self.zoom_scale_step )
 		if new_scale > 3 :
-			return False
+			return False	#Zoomupを許可しない
 		self.set_zoom_scale(new_scale)
 
 	def zoom_down(self,step=1):
@@ -3116,44 +3133,49 @@ class Stock_Chart(Content):
 		"""
 		new_scale = self.get_zoom_scale() - ( step * self.zoom_scale_step )
 		if new_scale <= 0 :
-			return False
+			return False	#ZoomDownを許可しない
 		self.set_zoom_scale(new_scale)
+
+	def pos2index(self,pos):
+		"""ローカル座標値posをその指示するx座標に変換する"""
+		#ローカル座標値X
+		posx = parse_coordinate(*pos)[0]
+
+		#indexから座標値へ変換する為の値
+		candle_width , NoUse = self.get_drawing_size()
+		start , end = self.get_drawing_index()
+		#index値の算出
+		for index in range(start,end+1) :
+			posx_for_index = self.get_index2pos_x(index)
+			if posx_for_index-candle_width <= posx <= posx_for_index+candle_width :
+				return index
+		else :
+			raise Exception("X座標値%dに対するindex値が見つかりませんでした。" % (posx))
 
 	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		"""
 		#水平ルーラーにコライドしているのならフラグを上げる
+		pos = self.get_parent_box().convert_pos_to_local(event.pos)	#ローカル座標値へ変換
 		for ruler in self.horizontal_rulers :
-			parent_lefttop_onroot = self.get_parent_box().get_left_top()
-			pos = (event.pos[0]-parent_lefttop_onroot[0],event.pos[1]-parent_lefttop_onroot[1])
 			if ruler.collide(pos) :
 				self.focused_horizontal_ruler = ruler
 				break
+		else :
 			self.focused_horizontal_ruler = None	#コライドしてないならフラグを下げる
 		#ハイライトして再描画
-		parent = self.get_parent_box()
-		candle_width , NoUse = self.get_drawing_size()
-		start , end = self.get_drawing_index()
-		for index in range(start,end+1) :
-			pos_x = self.get_index2pos_x(index)
-			if pos_x-candle_width <= event.pos[0] <= pos_x+candle_width:
-				self.set_highlight_index(index)
-				parent.draw()
-				break
+		index = pos2index(pos)
+		self.set_highlight_index(index)
+		self.get_parent_box.draw()
 
 	def process_MOUSEMOTION(self,event):
 		"""
 		仮実装
 		"""
-		parent = self.get_parent_box()
-		candle_width , NoUse = self.get_drawing_size()
-		start , end = self.get_drawing_index()
-		for index in range(start,end+1) :
-			pos_x = self.get_index2pos_x(index)
-			if pos_x-candle_width <= event.pos[0] <= pos_x+candle_width:
-				self.set_highlight_index(index)
-				parent.draw()
-				break
+		#ハイライトして再描画
+		index = pos2index(pos)
+		self.set_highlight_index(index)
+		self.get_parent_box.draw()
 
 	def process_MOUSEDRAG(self,event):
 		"""
@@ -3161,21 +3183,17 @@ class Stock_Chart(Content):
 		または水平ルーラーを移動させる
 		"""
 		#フォーカスされている水平ルーラーがあるならその高さを変更する
-		if self.focused_horizontal_ruler :
-			#Event.posYをこのチャートオブジェクトにおけるY座標値に変換し、それをflip(左下が(0,0)の形に変換)する。
-			left_top_onroot = self.get_parent_box().get_left_top()
-			top_margin = self.vertical_padding / 2
+		if self.focused_horizontal_ruler is not None :
+			#Event.posYをこのチャートオブジェクトにおけるY座標値に変換する
 			NoUse,relative_Y = self.get_parent_box().convert_pos_to_local(event.pos)
 			#算出された仮想Y座標値に対する、設定された価格値を算出する。
 			price_for_posY = self.height_to_price(relative_Y)
-			self.focused_horizontal_ruler.set_price( int( round(price_for_posY) ) )
-			return True
+			self.focused_horizontal_ruler.set_price(round(price_for_posY,1))
 
 		#チャートを移動させる
-		moving_val = event.rel[0] / 2
-		NoUse , end_index = self.get_drawing_index()
-		if end_index - self._num_of_candle - moving_val >= 0 and len(self.stock_price_list) > end_index - moving_val :
-			self.set_drawing_index( end=end_index - moving_val )
+		else :
+			moving_val = event.rel[0] / 2
+			self.move_drawing_index(moving_val)
 
 	def process_KEYDOWN(self,event):
 		"""
@@ -3199,9 +3217,9 @@ class Stock_Chart(Content):
 		#シフトモディファ時
 		elif event.mod == pygame.KMOD_SHIFT :
 			if event.key == pygame.K_h:
-				self.move_drawing_index(-10)
+				self.move_drawing_index(-15)
 			elif event.key == pygame.K_l :
-				self.move_drawing_index(+10)
+				self.move_drawing_index(+15)
 			elif event.key == pygame.K_j :
 				self.zoom_down()
 			elif event.key == pygame.K_k :
@@ -3218,7 +3236,7 @@ class Get_Url_Parser(HTMLParser):
 	def __init__(self):
 		HTMLParser.__init__(self)
 		self.date_list = []
-		self.F_in_target_element = False	#フラッグ
+		self.in_target_element = False	#フラッグ
 
 	def handle_starttag(self,tag,attrs):
 		"""
@@ -3226,21 +3244,21 @@ class Get_Url_Parser(HTMLParser):
 		"""
 		if tag.lower() == "div" :
 			attrs_dict = dict(attrs)
-			if "id" in attrs_dict and attrs_dict["id"] == "ymenu" :
-				self.F_in_target_element = True
+			if attrs_dict.get("id") == "ymenu" :
+				self.in_target_element = True
 
 	def handle_endtag(self,tag):
 		"""
 		目的の要素を抜ける時のメソッド
 		"""
-		if self.F_in_target_element and tag.lower() == "div" :
-			self.F_in_target_element = False
+		if self.in_target_element and tag.lower() == "div" :
+			self.in_target_element = False
 
 	def handle_data(self,data):
 		"""
 		日付を得るメソッド
 		"""
-		if self.F_in_target_element and data[0].isdigit():
+		if self.in_target_element and data[0].isdigit():
 			self.date_list.append(data)
 	
 	def get_dates(self,html_str):
@@ -3523,6 +3541,7 @@ def add_default_buttons(root):
 
 def add_default_labels(root):
 	"""
+	デフォルトのラベルの生成
 	"""
 	label_box = Label_Box(root)
 	label1 = Label(str_color=(255,0,0))
@@ -3725,7 +3744,7 @@ def get_human_readable(num):
 	"""
 	no_human_readable = str(num)
 	human_readable = ""
-	digit = math.log10(num)
+	digit = math.log10(num)	#桁数
 	#億以上なら
 	if digit >= 8 :
 		human_readable = no_human_readable[0:-8]
@@ -3739,19 +3758,20 @@ def get_human_readable(num):
 		human_readable += no_human_readable[start:-4]
 		human_readable += "万"
 		return human_readable
+	#あるいはそのまま返す
 	else :
 		return no_human_readable
 
 def parse_coordinate(*coordinate,**kargs):
 	"""
-	１つのタプル、あるいは２つのint値として定義されるCoordinate値ー
+	１つのタプル、あるいは２つのint値として定義されるCoordinate値
 	ー即ち、座標値(x,y)、あるいはサイズ値(width,height)などをパースし、一定の形式でリターンする共通アルゴリズムとしてのユーティリティ
 
 	値が予期せぬ形式の時にはすぐに例外を送出するが、オプション引数testが定義された時には、ただNoneを返すだけにとどまる
 	"""
 	def error(message=None):
 		if test :
-			return
+			return False
 		else :
 			message = message or ("引数はよきせぬ形式です : %r" % coordinate)
 			raise TypeError(message)
@@ -3763,7 +3783,7 @@ def parse_coordinate(*coordinate,**kargs):
 	#座標値がタプルとして渡された場合
 	elif isinstance(coordinate[0],tuple) :
 		#レングスが２で全部intなら正常
-		if len(coordinate[0]) == 2 and all( (isinstance(val,int) for val in coordinate[0]) ) :
+		if len(coordinate[0]) == 2 and all((isinstance(val,int) for val in coordinate[0])) :
 			x , y = coordinate[0]
 		#アンパックし忘れの補足:冗長なエラー出力をしておく
 		elif isinstance(coordinate[0][0],tuple) :
@@ -3773,6 +3793,7 @@ def parse_coordinate(*coordinate,**kargs):
 	#サイズ指定がタプルでなく省略形method(x,y)なら、
 	elif len(coordinate) == 2 and all( (isinstance(val,int) for val in coordinate) ) :
 		x , y = coordinate
+	#よきせぬ形式
 	else :
 		error()
 
