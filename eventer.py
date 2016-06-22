@@ -44,10 +44,10 @@ Usage :
 			node_distributer.get_next_target = function (-> Event_Listener or None )
 
 	# イベントの送出と受け取り。
-	4,イベント分配オブジェクトのsend(event_type,event_obj,target)を呼び出し、イベントを送出する。
+	4,イベント分配オブジェクトのsend_event(event_type,event_obj,target)を呼び出し、イベントを送出する。
 	  送出されたイベントは、すべからく、定義されたイベント送出対象オブジェクトEvent_Listenerのイベント受け取りインターフェイスreceive_event()を呼び出す。
 		target = Event_Listener
-		root_distributer.send(event_obj,event_obj,target)
+		root_distributer.send_event(event_obj,event_obj,target)
 			-> target.receive_event(event_type,event_obj)
 
 	# イベントハンドラの呼び出し
@@ -66,18 +66,18 @@ Usage :
 		「初めに」Event_Processorのreceive_event()を呼び出し、そのあとに、Event_Distributerのreceive_event()を呼び出す。
 
 	7,イベントの伝搬に関する実装処理ルーチンbubblingは、その伝搬先を決定するself.get_next_target()を呼び出し、
-	　もし、その返り値がEvent_Listenerならば、再帰的にそのイベントリスナーに対してイベントをsendする。
+	　もし、その返り値がEvent_Listenerならば、再帰的にそのイベントリスナーに対してイベントをsend_eventする。
 		Event_Distributer.bubbling(event_type,event_obj)
 			-> self.get_next_target() ( -> Event_Listener or None )
-				self.send(event_type,event_obj,next_target)
+				self.send_event(event_type,event_obj,next_target)
 
 イベントの伝搬:
 	イベント分配オブジェクトEvent_Distributerはイベントを伝搬させる。
-	具体的にはEvent_Distributer.send()によって単純にイベントを送出した後、その送出先オブジェクトのbubbling()メソッドを呼び出す。
+	具体的にはEvent_Distributer.send_event()によって単純にイベントを送出した後、その送出先オブジェクトのbubbling()メソッドを呼び出す。
 
 	このbubblingメソッドはそのオブジェクトのget_next_target()を呼び出し、次の伝搬先オブジェクトを決定する。
 	もしこれが偽をとれば、そのイベントの伝搬ーバブリングは停止する。
-	伝搬先がEvent_Listenerであれば、そのbubblingメソッドは、再帰的に、そのオブジェクトに対して再びイベントをsendする。
+	伝搬先がEvent_Listenerであれば、そのbubblingメソッドは、再帰的に、そのオブジェクトに対して再びイベントをsend_eventする。
 
 """
 #デフォルトのイベント名
@@ -119,7 +119,7 @@ class Event_Processor(Event_Listener):
 
 	def receive_event(self,event_type,event_obj):
 		"""
-		Event分配オブジェクトから伝搬:sendされたイベントを受け取る。
+		Event分配オブジェクトから伝搬:send_eventされたイベントを受け取る。
 		内部でコンテキストとして渡されたイベントタイプに対応するprocess_イベント処理メソッドを呼び出す
 		"""
 		#Processメソッドの呼び出し。
@@ -164,7 +164,7 @@ class Event_Distributer(Event_Listener):
 		if not isinstance(target,Event_Listener) :
 			raise TypeError("イベント送出対象オブジェクトが、イベントリスナー型でありません。")
 
-	def send(self,event_type,event_obj,target=None):
+	def send_event(self,event_type,event_obj,target=None):
 		"""
 		対象オブジェクトtargetにイベントを送出します。
 		"""
@@ -184,7 +184,7 @@ class Event_Distributer(Event_Listener):
 
 	def receive_event(self,event_type,event_obj):
 		"""
-		sendによって送られたイベントを受け取る。
+		send_eventによって送られたイベントを受け取る。
 		バブリング処理を行う点で、Event_Processorのそれより拡張されている。
 		"""
 		#イベントの伝搬
@@ -199,7 +199,7 @@ class Event_Distributer(Event_Listener):
 		next_target = self.get_next_target()
 		if next_target :
 			self.check_target(next_target)
-			self.send(event_type,event_obj,next_target)
+			self.send_event(event_type,event_obj,next_target)
 
 	def get_next_target(self):
 		"""
@@ -208,6 +208,15 @@ class Event_Distributer(Event_Listener):
 		デフォルトではNoneを返し、つまりイベントの伝搬は行わない。
 		"""
 		return
+
+
+class Event_Rooter(Event_Distributer):
+	"""
+	最上位のイベント分配オブジェクト。
+	イベントの補足をし、自分自身にイベントを送出することが期待される。
+	"""
+	def __init__(self):
+		Event_Distributer.__init__(self)
 
 
 # General Fucntion
