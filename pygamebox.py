@@ -1,9 +1,12 @@
 #! /usr/bin/python
 # -*- coding: utf-8 -*-
 
+import pygame
 import eventer
+import pygame_eventer
 import contaiers
 import identifire
+import command_reserver
 
 """
 pygameにおける描画領域の分割と、割り当て、さらには描画やイベントの伝搬までに関する広い範囲の枠組みとインターフェイスを提供するフロントエンドモジュール。
@@ -38,6 +41,7 @@ class BaseBox(
 	def __init__(self):
 		"""
 		"""
+		eventer.Event_Distributer.__init__(self)
 		self._width , self._height , self._left_top = 0,0,0	#絶対サイズ、座標値
 
 	# サイズに関するインターフェイス
@@ -84,6 +88,18 @@ class BaseBox(
 		"""
 		raise Exception("オーバーライド必須")
 
+	def convert_pos_to_local(self,*abs_pos):
+		"""
+		Root絶対座標値をこのBox内における相対座標(=BOXローカル座標値)へ変換する。
+		なお、絶対座標値abs_posはこのBOXにCollideしていることを前提としている。
+		"""
+		abs_pos = parse_coordinate(*abs_pos)
+		assert self.collide_point(abs_pos)	#エラーチェック
+		left_top_onroot = self.get_left_top()
+		relative_pos = ( (abs_pos[0] - left_top_onroot[0]) , (abs_pos[1] - left_top_onroot[1]) )
+		return relative_pos
+
+
 	# 画面の更新に関するメソッド
 	def draw(self):
 		"""描画メソッド"""
@@ -98,6 +114,7 @@ class RootBox(
 	BaseBox,
 	contaiers.Container_Of_Container,
 	identifire.ID_Holder,
+	command_reserver.Command_Reserver,
 	):
 	"""
 	Boxオブジェクトによる構造の最上位に立つ唯一のオブジェクト。
@@ -105,16 +122,26 @@ class RootBox(
 	"""
 	# 初期化メソッド
 	def __init__(self):
+		#上位オブジェクトの初期化処理
 		BaseBox.__init__(self)
+		containers.Container_Of_Container.__init__(self)
+		identifire.ID_Holder.__init__(self)
+		command_reserver.Command_Reserver.__init__(self)
+		#内部変数の初期化
 		self.init_attr()
 
 	def init_attr(self):
-		"""
-		"""
+		"""属性値の初期化"""
+		#サーフェスに関する属性
 		self.screen = pygame.display.get_surface()
 		self.background_color = BACKGROUND_COLOR
+		#動作に関する属性
+		self.looping = True	#メインループのスイッチ
+		self.fps = 30
+		#フォーカスに関する属性
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
+		#その他フラグ
 		self.initialized = False	#初期化処理が完全に完了しているか否かを表すフラグ。これがFalseの時は描画不能などの制限がある。
 		self.maximized = False		#このオブジェクトに関連付けられたスクリーンサーフェスが最大化されているかのフラグ
 
@@ -247,6 +274,57 @@ class RootBox(
 		for child_box in self.child_box_list:
 			child_box.draw()
 
+	def msec2numof_frame(msec):
+		"""ミリ秒をフレーム数に変換"""
+		if not isinstance(msec,int) :
+			raise TypeError("引数が不正です")
+		elif msec <= 100 :
+			#0.1秒以下ならとりあえず最小フレーム数でせってい
+			pending_frames = 1
+		else :
+			#引数msecとRootの設定Fps値から何フレーム後にコマンドを予約するか算出
+			msec_per_frame = 1000 / msec.fps	#self.fpsから、一フレームあたりの消費ミリ秒(1/1000秒)の算出
+			pending_frames = msec / msec_per_frame	#実行待ちフレーム数の算出
+		return pending_frames
+
+	#コマンドに関するメソッド
+	def after(self,command,msec):
+		"""
+		msec後に定義されたコマンドを実行する。
+		"""
+		def generate_closed_object():
+			"""フレーム数を格納するオブジェクトを生成"""
+			attributes = {"pending_frames" : msec2numof_frame(msec)}	#残りフレーム数を格納する
+			closed_object = type("Closed",(object,),attributes)
+			return closed_object
+
+		def generate_closer():
+			"""クロージャーの生成"""
+			closed_object = generate_closed_object()#クロージャーに内包されるクローズオブジェクト
+			#クロージャー
+			def update_pending_frame():
+				"""残りフレームを１消費して、それが0ならTrueを返すクロージャー"""
+				closed_object.pending_frames -= 1
+				condition = True if closed_object.pending_frames == 0 else False
+				return condition
+
+			return update_pending_frame
+
+		#残りフレーム数格納クロージャーの生成
+		update_pending_frame = generate_closer()
+		#コマンドの登録
+		reserved_command = command_reserver.Reserved_Command(command,update_pending_frame)
+		self.reserve_command(reserved_command)
+
+		return reserved_command
+
+	def mainloop():
+		"""メインループ"""
+		while self.looping :
+			self.event_loop()
+			self.resolve_command()
+			self.clock.tick(self.fps)
+
 
 class SubBox(
 	BaseBox,
@@ -263,7 +341,6 @@ class SubBox(
 		if box_id is not None :
 			if not isinstance(id_holder,RootBox):
 				raise TypeError("BOXオブジェクトのID情報の格納オブジェクトは、RootBoxでなければなりません。")
-
 		#初期化
 		BaseBox.__init__(self)
 		identifire.Identifire.__init__(box_id,id_holder)	#IDの設定。Noneなら省略される
@@ -273,18 +350,6 @@ class SubBox(
 		pass
 
 	# 描画領域に関するメソッド
-	def convert_pos_to_local(self,*abs_pos):
-		"""
-		Root絶対座標値をこのBox内における相対座標(=BOXローカル座標値)へ変換する。
-		なお、絶対座標値abs_posはこのBOXにCollideしていることを前提としている。
-
-		多重チェックによるオーバーヘッドを嫌って、あえて引数チェクを行わない
-		"""
-		abs_pos = parse_coordinate(*abs_pos)
-		left_top_onroot = self.get_left_top()
-		relative_pos = ( (abs_pos[0] - left_top_onroot[0]) , (abs_pos[1] - left_top_onroot[1]) )
-		return relative_pos
-
 	def calc_height(self):
 		"""
 		動的な高さの算出を行うオプショナルメソッド。デフォルトでは何もしない。
@@ -314,203 +379,44 @@ class SubBox(
 
 class Application(object):
 	"""
+	このアプリケーションのメインループを管理するオブジェクト。
 	"""
 	def main(self):
+		"""
+		1,pygameを初期化
+		2,screenサーフェスの作成と設定
+		3,メインループを包括するStock_Chart()インスタンスの生成と、そのメインループを呼び出す。
+		4,行儀よくexit
+		"""
+		#初期化処理
 		self.init_attr()
+		self.init_pygame()
+		#メインループ
 		self.main_loop()
+		#再初期化
+		pygame.quit()	#pygameの停止
 
 	def init_attr(self):
 		"""インスタンスメンバ変数の初期化"""
 		self.key_information = {}	#pygameから提供されるキーの定数と、その押され続けているフレーム数の辞書
-		self.looping = True	#メインループのスイッチ
 		self.clock = pygame.time.Clock()
 		self.fps = 30
 		self.reserved_commands = []	#self.afterによって予約された実行待ちコマンドのリスト
+		root = Root_Box()
 
-	def main_loop(self):
+	def init_pygame(self):
+		"""pygameの初期化"""
+		pygame.init()
+		pygame.display.set_caption("株チャートテクニカル分析")
+		pygame.display.set_mode(SCREEN_SIZE,pygame.RESIZABLE)
+
+	def mainloop(self):
 		"""
 		このアプリのメインループ
+		self.root.main_loopに移譲。
 		"""
-		while self.looping:
-			self.event_loop()
-			self.execute_reserved_commands()
-			self.clock.tick(self.fps)
+		self.root.mainloop()
 		
-	def get_key_state(self,key):
-		"""
-		キーの状態とフレームをまたいだキー状態に関する情報を得る為のインターフェイス。
-		押されていれば少なくとも0以上を返す
-		"""
-		return self.key_information.get(key,0)
-
-	def validate_keypress(self,key):
-		"""
-		引数に与えられたキーkeyについて、それに関するイベントが伝搬されるべきかどうかを判定するメソッド。
-		このメソッドは、そのキーについてのフレームをまたいでの情報を、self.key_informationから参照する。
-		なお、キーについての情報は、当然前フレームまでの情報をベースに取得するべきだから、
-		キー情報の更新メソッドself.update_key_information()は同一フレームにおいて、このメソッドより後に呼び出されなければならない。
-		"""
-		numof_frames = self.get_key_state(key)	#キーの押され続けているフレーム数
-		#消費フレーム数が1~3以内なら、それをブロックする。
-		if not numof_frames :
-			return True
-		elif 1 <= numof_frames <= 3 :
-			return False
-		elif 4 <= numof_frames :
-			return True
-
-	def update_key_information(self,pressed_keys):
-		"""
-		キー処理に関する状態を保存するためのメソッド。
-		押されたキーに対する、その押され続けているフレーム数を数える。
-
-		このメソッドはキーに関するすべてのイベント処理が終了してから呼ばれるべきである。
-		"""
-		#キーの押されているフレーム数をアップデートする
-		for key in pressed_keys :
-			if key in self.key_information :
-				self.key_information[key] += 1
-			else :
-				self.key_information[key] = 1
-
-		#フレーム検出中のキーが押されていないのならそのキーについてのフレーム情報を初期化
-		for key in [ key for key in self.key_information if self.key_information[key] ]:
-			if key not in pressed_keys :
-				self.key_information[key] = 0
-
-	def event_loop(self):
-		"""
-		イベントを補足、処理する最上層のルーチンで、イベントの処理はpygameによって提供される２つの手段を両方用います。
-		まず、全てのキーイベントに対しては、pygame.keyモジュールの枠組みを用います。これはpygame.eventではキーリピートを補足できない為です。
-		一方、マウスイベントや、その他終了、リサイズイベントの処理についてはpygame.eventに提供されるイベントキューの枠組みを用います。
-		ただし、イベントの処理に関する情報伝達インターフェイスの統一の為、「前者の枠組みにおいても」、能動的にイベントオブジェクトを発行し、これをdiispachする。
-		"""
-		def Process_event_on_keystate():
-			"""
-			pygame.keyを用いたキーイベント処理。
-			Eventオブジェクトを自己発行する。
-			また、キーの繰り返し処理に対応する為にself.validate_keypress()を、
-			キーについてのフレームをまたいだ情報を格納するためにself.update_key_information()を、それぞれこの中で呼ぶ。
-			"""
-			key_state = pygame.key.get_pressed()
-			pressed_keys = [ index for index in range(len(key_state)) if key_state[index] ]	#現在押されているキーのpygame定数のリスト
-			shift_mod , ctrl_mod = (pygame.K_RSHIFT in pressed_keys or pygame.K_LSHIFT in pressed_keys) , (pygame.K_RCTRL in pressed_keys or pygame.K_LCTRL in pressed_keys)
-			mod = ( shift_mod and pygame.KMOD_SHIFT ) or ( ctrl_mod and pygame.KMOD_CTRL ) or 0
-			for key in pressed_keys :
-				#Repeatなどの中間処理に関するキーブロックに引っかかるかどうか
-				if self.validate_keypress(key):
-					event = pygame.event.Event(pygame.KEYDOWN,key=key,mod=mod)	#イベントの発行
-					focused_box = self.get_focused_box()
-					focused_box.process_KEYDOWN(event)
-			self.update_key_information(pressed_keys)
-
-		def Process_event_on_queue():
-			"""
-			イベントキュー上の処理。
-			pygame.eventにより提供されるイベントキューからイベントを取り出して処理する。
-			"""
-			for event in pygame.event.get():
-				if event.type == pygame.QUIT or self.get_key_state(pygame.K_ESCAPE) :
-					self.looping = False	#停止。
-				elif event.type == pygame.MOUSEBUTTONDOWN :
-					self.process_MOUSEBUTTONDOWN(event)
-				elif event.type == pygame.MOUSEBUTTONUP :
-					continue
-				elif event.type == pygame.VIDEORESIZE :
-					self.resize_window(event.size)
-				elif event.type == pygame.MOUSEMOTION :
-					if event.buttons[0] :	#ドラッグイベントとして補足
-						self.process_MOUSEDRAG(event)
-					else :
-						self.process_MOUSEMOTION(event)
-				elif event.type == pygame.KEYDOWN :
-					if event.key == pygame.K_F11 :
-						self.maximize_window()
-		#Do Process
-		Process_event_on_keystate()
-		Process_event_on_queue()
-
-	def after(self,msec,command):
-		"""
-		Rootオブジェクトに関数の呼び出しを予約する
-		引数にはint値ミリ秒msec,と呼び出し可能なcommandをとる。
-		引数チェックのあと、予約コマンドリストに追加します
-
-		なお、帰り値は新たに生成されたコマンドオブジェクトで、予約済みコマンドキャンセルメソッドself.cancel_commandはこれを引数にとります。
-		"""
-		#待機時間msecが100(=0.1秒)以上であり、commandがcallableか否か
-		if not ( isinstance(msec,int) and ( msec is 0 or msec >= 100 ) ) or not callable(command) :
-			raise TypeError("引数が不正です")
-
-		if msec is 0 :
-			#明示的にmsecに0が与えられたら、最小フレーム(=次フレーム)にコマンドを予約
-			numof_waiting_frame = 1
-		else :
-			#引数msecとRootの設定Fps値から何フレーム後にコマンドを予約するか算出
-			msec_per_frame = 1000 / self.fps	#self.fpsから、一フレームあたりの消費ミリ秒(1/1000秒)の算出
-			numof_pending_frame = msec / msec_per_frame	#実行待ちフレーム数の算出
-
-		#コマンドの登録
-		reserved_command = self.Reserved_Command(numof_pending_frame,command)
-		self.reserved_commands.append(reserved_command)
-
-		return reserved_command
-
-	def cancel_command(self,command):
-		"""
-		コマンドをキャンセルします。
-		このメソッドは冗長なエラー送出を行います。
-		このエラー送出を回避するには、その呼び出し元で、すべてのコマンドオブジェクトの有するis_cancelable()を呼び出して、取り消し可能かチェックすることです。
-		"""
-		if not isinstance(command,self.Reserved_Command) :
-			raise TypeError("引数がCommandオブジェクトでありません")
-		if command in self.reserved_commands :
-			self.reserved_commands.remove(command)
-		else :
-			raise Exception("指定されたコマンドオブジェクトが予約済みコマンドリストに存在していません")
-
-	def execute_reserved_commands(self):
-		"""
-		予約されたコマンドの残り消費フレームを更新して、それが無くなればコマンドを呼び出す
-		"""
-		for command in copy.copy(self.reserved_commands) :
-			command.spend_frame()
-			if command.remaining_frame <= 0 :
-				command.call()
-				self.reserved_commands.remove(command)
-
-	class Reserved_Command:
-		"""
-		コマンド予約用の単純なユーザー定義型。
-		"""
-		def __init__(self,numof_pending_frame,command):
-			if not ( numof_pending_frame >=2 and callable(command) ) :
-				raise TypeError("引数が不正です")
-
-			self.remaining_frame = numof_pending_frame	#残りフレーム数
-			self.command = command
-			self.cancelable = True	#取り消し可能か否か。単純な符号であり、必ずしも動作の完全性を保証しない。
-
-		def is_cancelable(self):
-			return self.cancelable
-
-		def call(self):
-			"""登録されたコマンドを呼び出す"""
-			self.cancelable = False
-			return self.command()
-
-		def spend_frame(self,numof_frame=1):
-			"""
-			残りフレーム数を引数分だけ消費する。
-			"""
-			#冗長なエラーチェック
-			if self.remaining_frame <= 0:
-				raise Exception("すでに残り消費フレームはありません")
-
-			self.remaining_frame -= numof_frame
-			if self.remaining_frame < 0 :
-				self.remaining_frame = 0
-
 
 
 #あまり
@@ -554,8 +460,8 @@ class Root_Container:
 			if isinstance(box,Container_Box) and box.get_content() :
 				box_list.append(box)
 		return box_list
-"""
 		
+"""
 
 if __name__ == "__main__" :
 	print "This Module is not difined yet"
