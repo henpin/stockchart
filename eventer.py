@@ -126,19 +126,20 @@ class Event_Processor(Event_Listener):
 		if self.handlable(event_type) :
 			method_name = generate_method_name(event_type)
 			processing_method = getattr(self,method_name)
-			processing_method(event)
+			stop_bubbling = processing_method(event)
+			return stop_bubbling
 		else :
 			raise Exception("このイベント処理オブジェクトには、イベントタイプ %s に対する\
 				イベント処理メソッド %s が定義されていません。" % (event_type,method_name))
 
 
-class Event_Distributer(Event_Processor):
+class Event_Distributer(Event_Listener):
 	"""
 	イベントの監視、分配オブジェクト。
 	イベントが発生したら、定義された対象オブジェクトにイベントを送出する。
 	"""
 	def __init__(self):
-		pass
+		Event_Listener.__init__(self)
 
 	def check_target(self,target,event_type=None):
 		"""
@@ -147,7 +148,7 @@ class Event_Distributer(Event_Processor):
 		if not isinstance(target,Event_Listener) :
 			raise TypeError("イベント送出対象オブジェクトが、イベントリスナー型でありません。")
 
-	def send_event(self,target,event_type,event_obj):
+	def send_event(self,target,event_type,event):
 		"""
 		対象オブジェクトtargetにイベントを送出します。
 		"""
@@ -156,13 +157,19 @@ class Event_Distributer(Event_Processor):
 		#イベント名のチェック
 		check_event_name(event_type)
 
-	def receive_event(self,event_type,event_obj):
+		# イベントの送出
+		bubbling = True	#バブリング可
+		if isinstance(target,Event_Processor) :
+			bubbling = Event_Processor.receive_event(target,event_type,event)
+		if isinstance(target,Event_Distributer) and bubbling is not False :
+			Event_Distributer.receive_event(event_type,event)
+
+	def receive_event(self,event_type,event):
 		"""
 		send_eventによって送られたイベントを受け取る。
 		バブリング処理を行う点で、Event_Processorのそれより拡張されている。
 		"""
 		#イベントの伝搬
-		Event_Processor.receive_event(target,event_type,event_obj)
 		self.bubbling(event_type,event_obj)
 
 	def bubbling(self,event_type,event_obj):
@@ -207,31 +214,6 @@ class Event_Rooter(Event_Distributer):
 		dispatch_eventから呼ばれることが期待される。
 		"""
 		self.send(self,event_type,event)
-
-
-class Event_Monitor(Event_Listener):
-	"""
-	イベントをヴァリデートする分配オブジェクト。
-	通常のイベントの伝搬の中継部分に設置することで、イベントを監視できる。
-	監視されたオブジェクトは、もとのオブジェクトに帰る。
-	"""
-	def __init__(self):
-		Event_Distributer.__init__(self)
-
-	def receive_event(self,event_type,event):
-		"""
-		このオブジェクトに送出されたイベントはここを通る。
-		"""
-		if self.test(event_type,event):
-			pass
-
-		return event
-
-	def test(self,event_type):
-		"""
-		ここを通るイベントが監視対象かどうかを判定
-		"""
-		raise Exception("オーバーライド必須")
 
 
 # General Fucntion

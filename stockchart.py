@@ -35,7 +35,7 @@ from pygame.locals import *
 6,Button_Box:
 	ボタンボックス
 7,UI_Button_Label:
-	
+
 """
 
 #Global STATICS-----
@@ -275,7 +275,7 @@ class Root_Container(object):
 		if not self.initialized and error :
 			raise Exception("初期化処理が完了していません")
 		return self.initialized
-	
+
 	def add_box(self,child):
 		"""
 		Contaierのremoveオブジェクトのラッパ

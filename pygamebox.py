@@ -1,6 +1,7 @@
 #! /usr/bin/python
 # -*- coding: utf-8 -*-
 
+import eventer
 import pygame_eventer
 import contaiers
 import identifire
@@ -42,9 +43,13 @@ class PygameBox_EventRooter(pygame_eventer.Pygame_Event_Rooter):
 			self.EVENT_MOUSEDRAG,
 			self.EVENT_MOUSEMOTION,
 			)
+
 		#マウスイベントならposから対象の算出
 		if event_type in mouse_event :
 			return self.get_collide_box(event.pos)	#あればBoxを返し、なければNoneを返す
+		#キーイベントならフォーカスオブジェクトにバブリング
+		elif event_type == self.EVENT_KEYDOWN :
+			return self.get_focused_box()
 
 
 	#イベントプロセス
@@ -64,7 +69,7 @@ class PygameBox_EventRooter(pygame_eventer.Pygame_Event_Rooter):
 		"""
 		self.resize_window()
 	
-	def process_FKEYDOWN(self,event):
+	def process_FUNCTIONKEYDOWN(self,event):
 		"""
 		特殊キーのイベント処理
 		"""
@@ -268,10 +273,6 @@ class RootBox(
 		#すべての子ボックスオブジェクトに対して描画領域の設定
 		left_top=(0,0)	#width,height
 		for child_box in self.child_box_list :
-			"""#Boxコンテナなら、内部の静的サイズ情報の算出
-			if isinstance(child_box,Container_Box) :
-				child_box.calc_size()
-			"""
 			#サイズ情報とleft_topの分配、設定を行う。
 			if child_box.height_prefix :
 				child_box.set_left_top((left_top[0],left_top[1]))
@@ -279,20 +280,21 @@ class RootBox(
 				#動的な高さの定義
 				child_box.set_height(average_height_for_dividing)
 				child_box.set_left_top(left_top)
-			if child_box.width_prefix :
-				raise Exception("未定義です")
-			else :
-				child_box.set_width(display_width)	#処理が必要になったらheight同様動的に分割
+			#幅の設定。これは固定値を用いることにした
+			child_box.set_width(display_width)
 
 			left_top = (left_top[0],left_top[1]+child_box.get_height())
 
 	def calc_childbox_heightpercentage(self):
 		"""
-		このメソッドは、このオブジェクトの有する、すべての動的高さを持つ子BOXオブジェクトに対して、均等な描画領域を提供するために、それぞれの動的な高さを持つBOXにディスプレイ全体の何％の高さを提供するべきかを算出するメソッドであり、また、その上で、静的な高さを有するBOXオブジェクトのその設定された高さの総和も同時に算出、この2つの値をreturnする。
+		このメソッドは、すべての動的高さを持つ子BOXに対して均等な描画領域を提供するために、
+		それぞれの動的な高さを持つBOXにディスプレイ全体の何％の高さを提供するべきかを算出するメソッド
+		また、静的な高さを有するBOXオブジェクトのその設定された高さの総和も同時に算出、この2つの値をreturnする。
 		この2つの値は動的なサイズを有するBOXに適当な範囲を提供するために不可欠である。
 
-		1: 動的な高さ(box.prefix=False)で設定されたBOXオブジェクトに対し、等分な描画領域を提供するするための、平均パーセンテージをreturnする。
-		2: また、静的な高さを持ったBOXオブジェクト(self.prefix=True)に定義された高さ(self.height)の総和を返す。
+		返り値:
+		・ 動的な高さとして定義されたBOXオブジェクトに対し、等分な描画領域を提供するするための、平均パーセンテージをreturnする。
+		・ また、静的な高さを持ったBOXオブジェクトに定義された高さの総和を返す。
 		"""
 		prefixed_height_sum = 0
 		num_of_dynamicheight_childbox = 0
@@ -315,7 +317,22 @@ class RootBox(
 			if child_box.collide_point((x,y)) :
 				return child_box
 		return None
+
+
+	#フォーカスに関するメソッド
+	def get_focused_box(self):
+		return self._focused_box
 	
+	def set_focused_box(self,box):
+		"""
+		フォーカスのあるBOXを設定するセッターメソッド
+		"""
+		#与えられた引数のBOXが、今のフォーカスBOXと違うならば、処理をする。
+		if not box.is_focused :
+			self.prefocused_box = self.get_focused_box()
+			self._focused_box = box
+
+
 	#描画に関するメソッド
 	def update(self):
 		"""
@@ -336,18 +353,6 @@ class RootBox(
 		for child_box in self.child_box_list:
 			child_box.draw()
 
-	def msec2numof_frame(msec):
-		"""ミリ秒をフレーム数に変換"""
-		if not isinstance(msec,int) :
-			raise TypeError("引数が不正です")
-		elif msec <= 100 :
-			#0.1秒以下ならとりあえず最小フレーム数でせってい
-			pending_frames = 1
-		else :
-			#引数msecとRootの設定Fps値から何フレーム後にコマンドを予約するか算出
-			msec_per_frame = 1000 / msec.fps	#self.fpsから、一フレームあたりの消費ミリ秒(1/1000秒)の算出
-			pending_frames = msec / msec_per_frame	#実行待ちフレーム数の算出
-		return pending_frames
 
 	#コマンドに関するメソッド
 	def after(self,command,msec):
@@ -380,10 +385,25 @@ class RootBox(
 
 		return reserved_command
 
+	def msec2numof_frame(msec):
+		"""ミリ秒をフレーム数に変換"""
+		if not isinstance(msec,int) :
+			raise TypeError("引数が不正です")
+		elif msec <= 100 :
+			#0.1秒以下ならとりあえず最小フレーム数でせってい
+			pending_frames = 1
+		else :
+			#引数msecとRootの設定Fps値から何フレーム後にコマンドを予約するか算出
+			msec_per_frame = 1000 / msec.fps	#self.fpsから、一フレームあたりの消費ミリ秒(1/1000秒)の算出
+			pending_frames = msec / msec_per_frame	#実行待ちフレーム数の算出
+		return pending_frames
+
+
+	#制御処理
 	def mainloop():
 		"""メインループ"""
 		while self.looping :
-			self.event_loop()
+			self.dispatch_event()
 			self.resolve_command()
 			self.clock.tick(self.fps)
 
@@ -450,18 +470,6 @@ class SubBox(
 		else :
 			raise Exception("与えられたサーフェスがRootにより設定された絶対描画領域を超えます。")
 class Root_Container:
-	def get_focused_box(self):
-		return self._focused_box
-	
-	def set_focused_box(self,box):
-		"""
-		フォーカスのあるBOXを設定するセッターメソッド
-		"""
-		#与えられた引数のBOXが、今のフォーカスBOXと違うならば、処理をする。
-		if box is not self.get_focused_box() :
-			self.prefocused_box = self.get_focused_box()
-			self._focused_box = box
-			self.synchronize_button_state()
 
 	def synchronize_button_state(self):
 		"""
