@@ -117,7 +117,7 @@ class Event_Processor(Event_Listener):
 		method_name = generate_method_name(event_type)
 		return hasattr(self,method_name) 
 
-	def receive_event(self,event_type,event_obj):
+	def receive_event(self,event_type,event):
 		"""
 		Event分配オブジェクトから伝搬:send_eventされたイベントを受け取る。
 		内部でコンテキストとして渡されたイベントタイプに対応するprocess_イベント処理メソッドを呼び出す
@@ -126,36 +126,19 @@ class Event_Processor(Event_Listener):
 		if self.handlable(event_type) :
 			method_name = generate_method_name(event_type)
 			processing_method = getattr(self,method_name)
-			processing_method(event_obj)
+			processing_method(event)
 		else :
 			raise Exception("このイベント処理オブジェクトには、イベントタイプ %s に対する\
 				イベント処理メソッド %s が定義されていません。" % (event_type,method_name))
 
 
-class Event_Distributer(Event_Listener):
+class Event_Distributer(Event_Processor):
 	"""
 	イベントの監視、分配オブジェクト。
 	イベントが発生したら、定義された対象オブジェクトにイベントを送出する。
 	"""
 	def __init__(self):
-		self.default_target = None	#デフォルトのイベント伝搬対象オブジェクト
-
-	def set_default_target(self,default_target):
-		"""
-		デフォルトイベント送出対象オブジェクトの定義
-		"""
-		#イベントに関するインターフェイスを有していれば
-		self.check_target(default_target)
-		self.default_target = default_target
-
-	def get_default_target(self):
-		"""
-		デフォルトのイベント送出先オブジェクトを得るインターフェイス。未定義ならエラーを吐く。
-		"""
-		if self.default_target :
-			return self.default_target
-		else :
-			raise Exception("デフォルトのイベント送出先が未定義です。")
+		pass
 
 	def check_target(self,target,event_type=None):
 		"""
@@ -164,23 +147,14 @@ class Event_Distributer(Event_Listener):
 		if not isinstance(target,Event_Listener) :
 			raise TypeError("イベント送出対象オブジェクトが、イベントリスナー型でありません。")
 
-	def send_event(self,event_type,event_obj,target=None):
+	def send_event(self,target,event_type,event_obj):
 		"""
 		対象オブジェクトtargetにイベントを送出します。
 		"""
 		#イベント送出対象のチェック
-		if target is None :
-			target = self.get_default_target()
-		else :
-			self.check_target(target)
+		self.check_target(target)
 		#イベント名のチェック
 		check_event_name(event_type)
-
-		#イベントの受け渡し
-		if isinstance(target,Event_Processor) :
-			Event_Processor.receive_event(target,event_type,event_obj)
-		if isinstance(target,Event_Distributer) :
-			Event_Distributer.receive_event(target,event_type,event_obj)
 
 	def receive_event(self,event_type,event_obj):
 		"""
@@ -188,6 +162,7 @@ class Event_Distributer(Event_Listener):
 		バブリング処理を行う点で、Event_Processorのそれより拡張されている。
 		"""
 		#イベントの伝搬
+		Event_Processor.receive_event(target,event_type,event_obj)
 		self.bubbling(event_type,event_obj)
 
 	def bubbling(self,event_type,event_obj):
@@ -199,7 +174,7 @@ class Event_Distributer(Event_Listener):
 		next_target = self.get_next_target()
 		if next_target :
 			self.check_target(next_target)
-			self.send_event(event_type,event_obj,next_target)
+			self.send_event(next_target,event_type,event_obj)
 
 	def get_next_target(self):
 		"""
@@ -213,10 +188,50 @@ class Event_Distributer(Event_Listener):
 class Event_Rooter(Event_Distributer):
 	"""
 	最上位のイベント分配オブジェクト。
+	だが、実際にはただのEvent_Distributerのサブセット。つかっても使わなくてもよい。
 	イベントの補足をし、自分自身にイベントを送出することが期待される。
 	"""
 	def __init__(self):
 		Event_Distributer.__init__(self)
+
+	def dispatch_event(self):
+		"""
+		イベントの発行を行う最上位メソッド。
+		"""
+		raise Exception("オーバーライド必須")
+
+	def root_event(self,event_type,event):
+		"""
+		イベントの分配を行うメソッド。
+		実際にはただのsendのラッパ。自分自身にイベントをsendする。
+		dispatch_eventから呼ばれることが期待される。
+		"""
+		self.send(self,event_type,event)
+
+
+class Event_Monitor(Event_Listener):
+	"""
+	イベントをヴァリデートする分配オブジェクト。
+	通常のイベントの伝搬の中継部分に設置することで、イベントを監視できる。
+	監視されたオブジェクトは、もとのオブジェクトに帰る。
+	"""
+	def __init__(self):
+		Event_Distributer.__init__(self)
+
+	def receive_event(self,event_type,event):
+		"""
+		このオブジェクトに送出されたイベントはここを通る。
+		"""
+		if self.test(event_type,event):
+			pass
+
+		return event
+
+	def test(self,event_type):
+		"""
+		ここを通るイベントが監視対象かどうかを判定
+		"""
+		raise Exception("オーバーライド必須")
 
 
 # General Fucntion

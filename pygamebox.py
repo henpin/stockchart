@@ -1,12 +1,11 @@
 #! /usr/bin/python
 # -*- coding: utf-8 -*-
 
-import pygame
-import eventer
 import pygame_eventer
 import contaiers
 import identifire
 import command_reserver
+from pygame.locals import *
 
 """
 pygameにおける描画領域の分割と、割り当て、さらには描画やイベントの伝搬までに関する広い範囲の枠組みとインターフェイスを提供するフロントエンドモジュール。
@@ -19,14 +18,64 @@ pygameにおける描画領域の分割と、割り当て、さらには描画�
 
 """
 # Globals
-#Pygameのイベント名に対応するイベントプロセッサインターフェイスの生成
-PYGAME_GLOBAL_EVENTNAMES = (
-)#Pygameのイベント名
-PYGAME_GLOBAL_EVENT_PROCESSOR = eventer.generate_event_processor(PYGAME_GLOBAL_EVENTNAMES)
 
-#Classes
+# Base-Classes For Boxes
+class PygameBox_EventRooter(pygame_eventer.Pygame_Event_Rooter):
+	"""
+	Event_Rooterの最終実装基底クラス。
+	Root_Boxに継承されなければならない。
+	"""
+	def __init__(self):
+		"""
+		"""
+		if not isinstance(self,Root_Box):
+			raise TypeError("PygameBox_EventRooterクラスは、ただ、RootBoxの基底クラスです。")
+
+
+	#バブリングターゲットの定義
+	def get_next_target(self,event_type,event):
+		"""
+		バブリングターゲットの定義。
+		"""
+		mouse_event = (
+			self.EVENT_MOUSEBUTTONDOWN,
+			self.EVENT_MOUSEDRAG,
+			self.EVENT_MOUSEMOTION,
+			)
+		#マウスイベントならposから対象の算出
+		if event_type in mouse_event :
+			return self.get_collide_box(event.pos)	#あればBoxを返し、なければNoneを返す
+
+
+	#イベントプロセス
+	def process_MOUSEBUTTONDOWN(self,event):
+		"""
+		マウスボタンイベント。フォーカスの移動を行う
+		"""
+		#フォーカスの変更
+		collide_box = self.get_collide_box(event.pos)
+		if collide_box is not None and not collide_box.is_focused() :
+			self.set_focused_box(collide_box)
+			self.update()
+
+	def process_VIDEORESIZE(self,event):
+		"""
+		ウィンドウのリサイズを行う。
+		"""
+		self.resize_window()
+	
+	def process_FKEYDOWN(self,event):
+		"""
+		特殊キーのイベント処理
+		"""
+		# F11で最大化
+		if event.key == pygame.K_F11 :
+			self.maximize_window()
+
+
+# Box Classes
 class BaseBox(
-	PYGAME_GLOBAL_EVENT_PROCESSOR
+	pygame_eventer.PYGAME_GLOBAL_EVENT_PROCESSOR
 	eventer.Event_Distributer,
 	):
 	"""
@@ -43,6 +92,7 @@ class BaseBox(
 		"""
 		eventer.Event_Distributer.__init__(self)
 		self._width , self._height , self._left_top = 0,0,0	#絶対サイズ、座標値
+
 
 	# サイズに関するインターフェイス
 	def update_size(self):
@@ -70,6 +120,7 @@ class BaseBox(
 
 	def get_height(self):
 		return self._height
+
 
 	# サーフェスに関するメソッド
 	def get_rect(self):
@@ -110,11 +161,18 @@ class BaseBox(
 		raise Exception("オーバーライド必須")
 
 
+	# フォーカスに関するメソッド
+	def is_focused(self):
+		"""このBoxにフォーカスがあるか否か"""
+		raise Exception("オーバーライド必須")
+
+
 class RootBox(
 	BaseBox,
 	contaiers.Container_Of_Container,
 	identifire.ID_Holder,
 	command_reserver.Command_Reserver,
+	PygameBox_EventRooter
 	):
 	"""
 	Boxオブジェクトによる構造の最上位に立つ唯一のオブジェクト。
@@ -127,6 +185,7 @@ class RootBox(
 		containers.Container_Of_Container.__init__(self)
 		identifire.ID_Holder.__init__(self)
 		command_reserver.Command_Reserver.__init__(self)
+		pygame_eventer.Pygame_Event_Rooter.__init__(self)
 		#内部変数の初期化
 		self.init_attr()
 
@@ -138,6 +197,7 @@ class RootBox(
 		#動作に関する属性
 		self.looping = True	#メインループのスイッチ
 		self.fps = 30
+		self.clock = pygame.time.Clock()
 		#フォーカスに関する属性
 		self._focused_box = None	#操作の対象となっているコンテンツの直轄のBOX
 		self.prefocused_box = None
@@ -153,6 +213,7 @@ class RootBox(
 		if not self.initialized and error :
 			raise Exception("初期化処理が完了していません")
 		return self.initialized
+
 
 	# Windowサイズに関するメソッド
 	def resize_window(self,*size):
@@ -185,6 +246,7 @@ class RootBox(
 		else :
 			self.resize_window()	#引数なしの呼び出しでデフォルトサイズにリサイズ
 			self.maximized = False	#フラグを下ろす
+
 
 	# 子Boxの描画領域に関するメソッド
 	def set_child_box_area(self):
@@ -375,48 +437,6 @@ class SubBox(
 		surface = pygame.Surface(surface_size or self.get_size())
 		surface.fill(bgcolor)
 		return surface
-
-
-class Application(object):
-	"""
-	このアプリケーションのメインループを管理するオブジェクト。
-	"""
-	def main(self):
-		"""
-		1,pygameを初期化
-		2,screenサーフェスの作成と設定
-		3,メインループを包括するStock_Chart()インスタンスの生成と、そのメインループを呼び出す。
-		4,行儀よくexit
-		"""
-		#初期化処理
-		self.init_attr()
-		self.init_pygame()
-		#メインループ
-		self.main_loop()
-		#再初期化
-		pygame.quit()	#pygameの停止
-
-	def init_attr(self):
-		"""インスタンスメンバ変数の初期化"""
-		self.key_information = {}	#pygameから提供されるキーの定数と、その押され続けているフレーム数の辞書
-		self.clock = pygame.time.Clock()
-		self.fps = 30
-		self.reserved_commands = []	#self.afterによって予約された実行待ちコマンドのリスト
-		root = Root_Box()
-
-	def init_pygame(self):
-		"""pygameの初期化"""
-		pygame.init()
-		pygame.display.set_caption("株チャートテクニカル分析")
-		pygame.display.set_mode(SCREEN_SIZE,pygame.RESIZABLE)
-
-	def mainloop(self):
-		"""
-		このアプリのメインループ
-		self.root.main_loopに移譲。
-		"""
-		self.root.mainloop()
-		
 
 
 #あまり
