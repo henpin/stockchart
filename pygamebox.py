@@ -1,10 +1,10 @@
 #! /usr/bin/python
 # -*- coding: utf-8 -*-
 
+import identifire
+import contaiers
 import eventer
 import pygame_eventer
-import contaiers
-import identifire
 import command_reserver
 from pygame.locals import *
 
@@ -52,7 +52,7 @@ class PygameBox_EventRooter(pygame_eventer.Pygame_Event_Rooter):
 			return self.get_focused_box()
 
 
-	#イベントプロセス
+	#トップレベル:イベントプロセス
 	def process_MOUSEBUTTONDOWN(self,event):
 		"""
 		マウスボタンイベント。フォーカスの移動を行う
@@ -92,6 +92,7 @@ class BaseBox(
 	・(pygameのすべての標準イベントタイプに対する処理インターフェイスを有する)イベント処理オブジェクトである。
 	・サーフェスの取得と、その利用に関するインターフェイスを有する。
 	"""
+	#初期化処理
 	def __init__(self):
 		"""
 		"""
@@ -126,6 +127,10 @@ class BaseBox(
 	def get_height(self):
 		return self._height
 
+	def set_size_prefix(self,boolean):
+		assert isinstance(boolean,bool)
+		self.size_prefixed = boolean
+
 
 	# サーフェスに関するメソッド
 	def get_rect(self):
@@ -134,17 +139,17 @@ class BaseBox(
 		size = self.get_size()
 		return pygame.Rect(left_top,size)
 
-	def collide_point(self,*pos):
-		"""定義された絶対座標値posがこのオブジェクトに与えられた描画領域と衝突するかチェックする"""
-		return self.get_rect().collidepoint(pos)
-
 	def get_surface(self,surface_size=None,bgcolor=BACKGROUND_COLOR):
 		"""
 		定義された描画領域を表現するサーフェスを得る為のインターフェイス。
 		"""
 		raise Exception("オーバーライド必須")
 
-	def convert_pos_to_local(self,*abs_pos):
+	def collide_point(self,*pos):
+		"""定義された絶対座標値posがこのオブジェクトに与えられた描画領域と衝突するかチェックする"""
+		return self.get_rect().collidepoint(pos)
+
+	def abspos2local(self,*abs_pos):
 		"""
 		Root絶対座標値をこのBox内における相対座標(=BOXローカル座標値)へ変換する。
 		なお、絶対座標値abs_posはこのBOXにCollideしていることを前提としている。
@@ -172,11 +177,102 @@ class BaseBox(
 		raise Exception("オーバーライド必須")
 
 
+class Base_BoxContainer(BaseBox):
+	"""
+	BaseBoxを継承する任意のBoxオブジェクトを「格納」、「利用」するための枠組みを提供する基底クラス
+	"""
+	def __init__(self):
+		pass
+
+	# 子Boxの描画領域に関するメソッド
+	def set_child_box_area(self):
+		"""
+		(すべてのこのオブジェクトの子BOXオブジェクトに)描画領域の分配を行うメソッド
+		まずself.calc_childbox_heightpercentage()メソッドを呼び出し、均等な分配のための値を算出し、その値を用いて、実際の設定を行う。
+
+		描画領域についてのすべての情報は、個々の子BOXオブジェクトのメンバ変数に保持されている。
+		具体的には、box._left_topと、box.height、box.widthの3つの変数である。つまり、このメソッドはこの情報を設定する。
+		"""
+		#基本値の取得
+		display_height = self.screen.get_height()	#スクリーンサーフェス全体の大きさ
+		display_width = self.screen.get_width()
+		average_height_percentage , prefixed_height_sum = self.calc_childbox_heightpercentage()
+		#算出に必要な値の算出
+		height_for_dynamic_dividing = display_height - prefixed_height_sum	#動的に分割可能な高さ
+		average_height_for_dividing = int (height_for_dynamic_dividing * (float(average_height_percentage) / 100))	#動的に分割される高さの値
+
+		#すべての子ボックスオブジェクトに対して描画領域の設定
+		left_top=(0,0)	#width,height
+		for child_box in self.child_box_list :
+			#サイズ情報とleft_topの分配、設定を行う。
+			if child_box.height_prefix :
+				child_box.set_left_top((left_top[0],left_top[1]))
+			else :
+				#動的な高さの定義
+				child_box.set_height(average_height_for_dividing)
+				child_box.set_left_top(left_top)
+			#幅の設定。これは固定値を用いることにした
+			child_box.set_width(display_width)
+
+			left_top = (left_top[0],left_top[1]+child_box.get_height())
+
+	def calc_childbox_heightpercentage(self):
+		"""
+		このメソッドは、すべての動的高さを持つ子BOXに対して均等な描画領域を提供するために、
+		それぞれの動的な高さを持つBOXにディスプレイ全体の何％の高さを提供するべきかを算出するメソッド
+		また、静的な高さを有するBOXオブジェクトのその設定された高さの総和も同時に算出、この2つの値をreturnする。
+		この2つの値は動的なサイズを有するBOXに適当な範囲を提供するために不可欠である。
+
+		返り値:
+		・ 動的な高さとして定義されたBOXオブジェクトに対し、等分な描画領域を提供するするための、平均パーセンテージをreturnする。
+		・ また、静的な高さを持ったBOXオブジェクトに定義された高さの総和を返す。
+		"""
+		prefixed_height_sum = 0
+		num_of_dynamicheight_childbox = 0
+		for child_box in self.child_box_list :
+			if child_box.height_prefix :
+				prefixed_height_sum += child_box.get_height()
+			else :
+				num_of_dynamicheight_childbox += 1
+
+		average_height_percentage = int(100 / (num_of_dynamicheight_childbox or 1))
+		return average_height_percentage , prefixed_height_sum
+
+	def get_collide_box(self,*pos):
+		"""
+		与えられたポジション(X,Y)に対してcollide判定された子BOXオブジェクトを返す
+		いかなる子BOXオブジェクトもcollideに反応しなければ、Noneを返す。
+		"""
+		x , y = parse_coordinate(*pos)
+		for child_box in self.get_children() :
+			if child_box.collide_point((x,y)) :
+				return child_box
+		return None
+
+
+	#描画に関するメソッド
+	def update(self):
+		"""
+		このRootオブジェクト以下の構造を再評価して、Box描画領域の再分割、全体の再描画、を明示的に行う。
+		このメソッドは、内部構造の変更後、常に呼び出してよい。
+		内部構造情報から正確な諸値をー最新の値としてー再導出するだけだから、
+		(古い情報が失われることと、その導出などに関するわずかなオーバーヘッド以外にはー)いかなる副作用もない。
+		"""
+		self.set_child_box_area()
+		self.draw()
+
+	def draw(self):
+		self.get_surface(self)
+		for child_box in self.child_box_list:
+			child_box.draw()
+
+
 class RootBox(
-	BaseBox,
-	contaiers.Container_Of_Container,
 	identifire.ID_Holder,
+	contaiers.Container_Of_Container,
 	command_reserver.Command_Reserver,
+	BaseBox,
+	Base_BoxContainer,
 	PygameBox_EventRooter
 	):
 	"""
@@ -253,72 +349,6 @@ class RootBox(
 			self.maximized = False	#フラグを下ろす
 
 
-	# 子Boxの描画領域に関するメソッド
-	def set_child_box_area(self):
-		"""
-		(すべてのこのオブジェクトの子BOXオブジェクトに)描画領域の分配を行うメソッド
-		まずself.calc_childbox_heightpercentage()メソッドを呼び出し、均等な分配のための値を算出し、その値を用いて、実際の設定を行う。
-
-		描画領域についてのすべての情報は、個々の子BOXオブジェクトのメンバ変数に保持されている。
-		具体的には、box._left_topと、box.height、box.widthの3つの変数である。つまり、このメソッドはこの情報を設定する。
-		"""
-		#基本値の取得
-		display_height = self.screen.get_height()	#スクリーンサーフェス全体の大きさ
-		display_width = self.screen.get_width()
-		average_height_percentage , prefixed_height_sum = self.calc_childbox_heightpercentage()
-		#算出に必要な値の算出
-		height_for_dynamic_dividing = display_height - prefixed_height_sum	#動的に分割可能な高さ
-		average_height_for_dividing = int (height_for_dynamic_dividing * (float(average_height_percentage) / 100))	#動的に分割される高さの値
-
-		#すべての子ボックスオブジェクトに対して描画領域の設定
-		left_top=(0,0)	#width,height
-		for child_box in self.child_box_list :
-			#サイズ情報とleft_topの分配、設定を行う。
-			if child_box.height_prefix :
-				child_box.set_left_top((left_top[0],left_top[1]))
-			else :
-				#動的な高さの定義
-				child_box.set_height(average_height_for_dividing)
-				child_box.set_left_top(left_top)
-			#幅の設定。これは固定値を用いることにした
-			child_box.set_width(display_width)
-
-			left_top = (left_top[0],left_top[1]+child_box.get_height())
-
-	def calc_childbox_heightpercentage(self):
-		"""
-		このメソッドは、すべての動的高さを持つ子BOXに対して均等な描画領域を提供するために、
-		それぞれの動的な高さを持つBOXにディスプレイ全体の何％の高さを提供するべきかを算出するメソッド
-		また、静的な高さを有するBOXオブジェクトのその設定された高さの総和も同時に算出、この2つの値をreturnする。
-		この2つの値は動的なサイズを有するBOXに適当な範囲を提供するために不可欠である。
-
-		返り値:
-		・ 動的な高さとして定義されたBOXオブジェクトに対し、等分な描画領域を提供するするための、平均パーセンテージをreturnする。
-		・ また、静的な高さを持ったBOXオブジェクトに定義された高さの総和を返す。
-		"""
-		prefixed_height_sum = 0
-		num_of_dynamicheight_childbox = 0
-		for child_box in self.child_box_list :
-			if child_box.height_prefix :
-				prefixed_height_sum += child_box.get_height()
-			else :
-				num_of_dynamicheight_childbox += 1
-
-		average_height_percentage = int(100 / (num_of_dynamicheight_childbox or 1))
-		return average_height_percentage , prefixed_height_sum
-
-	def get_collide_box(self,*pos):
-		"""
-		与えられたポジション(X,Y)に対してcollide判定された子BOXオブジェクトを返す
-		いかなる子BOXオブジェクトもcollideに反応しなければ、Noneを返す。
-		"""
-		x , y = parse_coordinate(*pos)
-		for child_box in self.get_children() :
-			if child_box.collide_point((x,y)) :
-				return child_box
-		return None
-
-
 	#フォーカスに関するメソッド
 	def get_focused_box(self):
 		return self._focused_box
@@ -333,25 +363,14 @@ class RootBox(
 			self._focused_box = box
 
 
-	#描画に関するメソッド
-	def update(self):
-		"""
-		このRootオブジェクト以下の構造を再評価して、Box描画領域の再分割、全体の再描画、を明示的に行う。
-		このメソッドは、内部構造の変更後、常に呼び出してよい。
-		内部構造情報から正確な諸値をー最新の値としてー再導出するだけだから、
-		(古い情報が失われることと、その導出などに関するわずかなオーバーヘッド以外にはー)いかなる副作用もない。
-		"""
-		self.set_child_box_area()
-		self.draw()
+	#サーフェス、描画に関する処理
+	def get_surface(self):
+		self.fill_background()	#塗りつぶし
+		return self.screen
 
 	def fill_background(self,rect=None):
 		self.screen.fill(self.background_color,rect)
 		pygame.display.update(rect)
-
-	def draw(self):
-		self.fill_background()
-		for child_box in self.child_box_list:
-			child_box.draw()
 
 
 	#コマンドに関するメソッド
@@ -409,27 +428,37 @@ class RootBox(
 
 
 class SubBox(
-	BaseBox,
-	contaiers.Contained,
 	identifire.Identifire,
+	contaiers.Single_Container,
+	contaiers.Plural_Container,
+	contaiers.Container_Of_Container,
+	BaseBox,
 	):
 	"""
+	RootBoxに格納されるべきコンテンツ格納オブジェクト。
+	同じSubBoxか、あるいはPygameBox_Contentを継承する任意のオブジェクトを格納する。
 	"""
 	# 初期化処理
-	def __init__(self,id_holder=None,boxid=None,):
+	def __init__(self,root,valid_container_type,boxid=None):
 		"""
 		"""
 		#引数チェック
-		if box_id is not None :
-			if not isinstance(id_holder,RootBox):
-				raise TypeError("BOXオブジェクトのID情報の格納オブジェクトは、RootBoxでなければなりません。")
+		if not isinstance(root,RootBox):
+			raise TypeError("SubBoxオブジェクトの格納オブジェクトは、RootBoxでなければなりません。")
+
+		#コンテナに関する有効実装型の定義
+		if valid_container_type is None :
+			raise Exception("コンテナ実装型は定義必須です")
+		self.set_valid_container_type(valid_container_type)
+	
 		#初期化
 		BaseBox.__init__(self)
-		identifire.Identifire.__init__(box_id,id_holder)	#IDの設定。Noneなら省略される
+		identifire.Identifire.__init__(boxid,root)	#IDの設定。Noneなら省略される
 		self.init_attr()
 
 	def init_attr(self):
 		pass
+
 
 	# 描画領域に関するメソッド
 	def calc_height(self):
@@ -446,6 +475,7 @@ class SubBox(
 		"""
 		pass
 
+
 	# サーフェスに関するメソッド
 	def get_surface(self,surface_size=None,bgcolor=BACKGROUND_COLOR):
 		"""
@@ -457,20 +487,48 @@ class SubBox(
 		surface = pygame.Surface(surface_size or self.get_size())
 		surface.fill(bgcolor)
 		return surface
-
-
-#あまり
-"""
+	
 	def update(self,surface) :
-		"""新しいサーフェスを引数にとって、与えられた描画領域に再描画"""
+		"""新しいサーフェスを引数にとって、定義された描画領域に再描画"""
 		rect = self.get_rect()
 		if rect.contains(surface.get_rect()) :
 			self.get_display_surface().blit(surface,rect)
 			pygame.display.update(rect)
 		else :
 			raise Exception("与えられたサーフェスがRootにより設定された絶対描画領域を超えます。")
-class Root_Container:
 
+
+class Sub_BoxContainer(
+	Base_BoxContainer,
+	SubBox,
+	)
+	"""
+	RootBoxに格納、利用されるためのインターフェース(SubBox)を継承した、Base_BoxContainerの実装クラス。
+	任意の個数の(Sub)Boxオブジェクトを格納する。
+	"""
+	def __init__(self,root,boxid):
+		Base_BoxContainer.__init__(self)
+		SubBox.__init__(self,contaiers.Container_Of_Container,boxid)
+
+
+class PygameBox_Content(contaiers.Contained):
+	"""
+	ContainedのPygameBox拡張
+	SubBoxに格納されるコンテンツに既定されるべき、共通インターフェイス。
+	"""
+	def __init__(self):
+		pass
+
+	def calc_height(self):
+		pass
+
+	def calc_width(self):
+		pass
+
+
+#あまり
+"""
+class Root_Container:
 	def synchronize_button_state(self):
 		"""
 		ボタン状態の同期を行う。実際の同期処理は、UI_Buttonクラスのインスタンスのcall_synchro_function()によって行われる。
@@ -481,14 +539,12 @@ class Root_Container:
 				#トグル可能なボタンなら
 				button.call_synchro_function()
 		buttonbox.draw()
-
 	def get_all_container_box(self):
 		box_list = []
 		for box in self.child_box_list :
 			if isinstance(box,Container_Box) and box.get_content() :
 				box_list.append(box)
 		return box_list
-		
 """
 
 if __name__ == "__main__" :

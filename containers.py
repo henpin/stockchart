@@ -254,6 +254,8 @@ class Base_Container(Contained):
 		def set_valid_container_type_explicit():
 			if not isinstance(self,valid_type) :
 				raise TypeError("継承していない型を有効型にはできません")
+			elif valid_type not in self.implement_types :
+				raise TypeError("定義されたクラス %s はコンテナ実装型でありません" % (valid_type))
 			#設定
 			self.valid_container_type = valid_type
 
