@@ -1,113 +1,54 @@
 #! /usr/bin/python
 #-*- coding: utf-8 -*-
 
-import stockchart 
+import setup
+from test_utils import *
+from containers import *
 
 """
+containersモジュールのテスト
 """
+RANDOM_BUILTIN_OBJECTS = ("str",1,573,(5,6),list(),object(),{1:3,5:8})
 
-
-class Tester(object):
+# TestCases
+class ContainersTestCase(
+	TestCase,
+	Single_Container,
+	Plural_Container,
+	Container_Of_Container
+	):
 	"""
-	単体テストクラス
-	クラス単一の単位でテストを行う。
+	テスト用の基底クラス
 	"""
-	#Test Classes
-	class Container_Inherited_Plural(Plural_Container):
-		"""複数格納コンテナを継承するコンテナ実装"""
-		def __init__(self):
-			Plural_Container.__init__(self)
-
-
-	class Double_Inherited_Container(Single_Container,Container_Of_Container):
-		"""単一オブジェクト格納コンテナおよびコンテナコンテインナーを継承するコンテナ実装"""
-		def __init__(self):
-			Single_Container.__init__(self)
-			Container_Of_Container.__init__(self)
-
-	#Methods
-	def __init__(self):
+	def __init__(self,implement_type):
 		"""
-		実装型のインスタンスの生成。
 		"""
-		#コンテナオブジェクト
-		self.Plural = self.Container_Inherited_Plural()
-		self.Double = self.Double_Inherited_Container()
-		#Containedオブジェクト
-		self.contained_list = []
+		implement_type.__init__(self)
+		self.set_valid_container_type(implement_type)
+		self.add_method = implement_type._add
+		self.container_contained_table = {}
 
-	def append_contained_list(self,val):
-		"""ユーティリティ"""
-		self.contained_list.append(val)
-		return val
+	def test_add(self):
+		for error_obj in RANDOM_BUILTIN_OBJECTS :
+			self.assertRaises(NameError,self.add_method,(self,error_obj))
+		for i in range(10):
+			contained = Contained()
+			if self.get_valid_container_type() is Container_Of_Container :
+				self.assertRaises(TypeError,self.add_method,(self,contained))
+			else :
+				self.add_method(self,contained)
+			self.container_contained_table[self.get_valid_container_type] = contained 
 
-	def test_plural_container(self):
-		"""コンテナ実装のテスト"""
-		print "pluralコンテナのテストを開始します..."
-		for x in range(3) :
-			ins = self.append_contained_list(Contained())
-			self.Plural.add_child(ins)
-
-		print "\t子オブジェクト"
-		for child in self.Plural :
-			print "\t",child
-
-		print "Done\n"
-
-	def test_double_container(self):
-		"""多様性を有するコンテナ実装のテスト"""
-		print "Doubleコンテナのテストを開始します..."
-
-		#Container_Of_Container有効
-		print "Container_Of_コンテナを有効にしたテスト"
-		self.Double.set_valid_container_type(Container_Of_Container)
-		ins = self.append_contained_list(Plural_Container())
-		self.Double.add_container(ins)
-		print "\t子オブジェクト"
-		print "\t",self.Double.get_children()
-
-		#Single Container 有効
-		print "Singleコンテナを有効にしたテスト"
-		self.Double.set_valid_container_type(Single_Container)
-		ins = self.append_contained_list(Contained())
-		self.Double.set_child(ins)
-		print "\t子オブジェクト"
-		print "\t",self.Double.get_children()
-
-		#Container_Of_Container 再有効
-		print "Container_Of_コンテナを再び有効にしたテスト"
-		self.Double.set_valid_container_type(Container_Of_Container)
-		for x in range(3):
-			ins = self.append_contained_list(Single_Container())
-			self.Double.add_container(ins)
-
-		self.Double.add_container(self.append_contained_list(self.Plural))
-
-		print "\t子オブジェクト"
-		for child in self.Double :
-			print "\t",child
-		print "Done\n"
-
-	def test_contained(self):
-		"""Containedのテスト"""
-		print "Contaiendのテストを開始します..."""
-		for ins in self.contained_list :
-			print "\t",ins," 親:",ins.get_container()
-
-		print "Done\n"
-
-	def test_all(self):
-		"""Run all tests"""
-		print "テストを開始します"
-		self.test_plural_container()
-		self.test_double_container()
-		self.test_contained()
-		print "全体のテストが終了しました"
+def testcase_generator():
+	for implement_type in IMPLEMENT_CONTAINER_TYPE :
+		testcase = ContainersTestCase(implement_type)
+		yield testcase
 
 
-if __name__ == '__main__' :
-	print "containersのテストを開始します"
-	tester = Tester()
-	tester.test_all()
-	print "containersのテストが終了しました"
+if __name__ == '__main__':
+	test_monitor = Test_Monitor(ContainersTestCase,Base_Container)
+	for testcase in testcase_generator() :
+		test_monitor.test(testcase)
+
+
 

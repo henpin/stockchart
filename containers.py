@@ -117,11 +117,7 @@ class Base_Container(Contained):
 		すべてのコンテナ実装型がこの初期化ルーチンを呼ばなくてはならない。
 		この初期化ルーチンでは、コンテナの多様性に関する初期化処理を行う。
 		"""
-		Base_Container.implement_types = (
-			Single_Container,
-			Plural_Container,
-			Container_Of_Container,
-			)#コンテナ実装型のタプル
+		self.implement_types = tuple(IMPLEMENT_CONTAINER_TYPE)	#浅いコピー
 		#コンテナinコンテナのサポートのためContainedの初期化処理の呼び出し
 		Contained.__init__(self)
 
@@ -388,6 +384,12 @@ class Container_Of_Container(Base_Container):
 		else :
 			raise Exception("Container_Of_Container: 引数Childはこのオブジェクトの子Containedオブジェクトでありません.")
 
+
+IMPLEMENT_CONTAINER_TYPE = (
+	Single_Container,
+	Plural_Container,
+	Container_Of_Container,
+	)#ビルトインコンテナ実装型
 
 if __name__ == '__main__' :
 	print "containers.py : コンテナオブジェクトのインターフェイス群を提供するモジュールです。"
