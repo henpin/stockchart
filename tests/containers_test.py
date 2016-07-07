@@ -30,7 +30,7 @@ class ContainersTestCase(
 
 	def test_add(self):
 		for error_obj in RANDOM_BUILTIN_OBJECTS :
-			self.assertRaises(NameError,self.add_method,(self,error_obj))
+			self.assertRaises(TypeError,self.add_method,(self,error_obj))
 		for i in range(10):
 			contained = Contained()
 			if self.get_valid_container_type() is Container_Of_Container :
@@ -46,9 +46,10 @@ def testcase_generator():
 
 
 if __name__ == '__main__':
-	test_monitor = Test_Monitor(ContainersTestCase,Base_Container)
+	test_monitor = Test_Profiler(ContainersTestCase,Base_Container)
 	for testcase in testcase_generator() :
 		test_monitor.test(testcase)
+	test_monitor.report_result()
 
 
 
