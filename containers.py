@@ -134,6 +134,8 @@ class Base_Container(Contained):
 		イテラブルにします。
 		コンテナ多様性のために隠蔽されたクラスのメソッドを呼び出します。
 		"""
+		if self.get_valid_container_type() is Single_Container :
+			raise TypeError("Single_Containerはイテレーション不能です.")
 		self.test_valid_container_type()	#有効コンテナ型が定義済か確認
 		return iter(self.get_children())
 

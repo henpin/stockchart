@@ -101,10 +101,9 @@ class Test_Profiler(object):
 		self.skipped_testcase = 0
 
 
-	# Context Manager
+	# Context Manager protocol
 	def __enter__(self):
 		#初期化レポート
-		print Paragraph(Paragraph.H1).get_horizontalstr(title="Test Profiler")
 		self.print_initial_report()
 		return self
 
@@ -121,8 +120,10 @@ class Test_Profiler(object):
 		初期化レポートの表示
 		"""
 		initial_report = \
-			"\n\ttestClass : %s\n" % (self.testCaseClass.__name__,)\
-			+"\tExclusionClass : %s" % (self.bases and self.bases.__name__)
+			"\n\n\n"\
+			"Test Profiler"\
+			"\ntestClass : %s\n" % (self.testCaseClass.__name__,)\
+			+"ExclusionClass : %s" % (self.bases and self.bases.__name__)
 			
 		print initial_report
 
@@ -153,9 +154,9 @@ class Test_Profiler(object):
 		elif not isinstance(ins,self.testCaseClass) :
 			raise TypeError("引数insは定義されたテストクラスのインスタンスでなければなりません")
 
-		print "\n"
+		# テストの実行と、結果の出力
 		with Paragraph(Paragraph.H1,title="テストケース %d" % (self.processed_testcase+1),end_horizontal=False) as para :
-			para.write("対象オブジェクト :\n\t%s\n" % ins)
+			para.write("対象オブジェクト :\n\t%s\n\n" % ins)
 
 			# テストメソッドの呼び出し
 			processed ,skipped = 0 ,0
@@ -167,19 +168,19 @@ class Test_Profiler(object):
 
 			# 失敗したテストに関する出力
 			if self.errors :
-				para.write("");self.show_error()	#エラーが送出されていればその詳細情報の表示。
+				self.show_error()	#エラーが送出されていればその詳細情報の表示。
 			# 結果の出力
 			para.write("\nテストが終了しました。\\")
 			self.show_result(processed,len(self.errors),skipped)
 			para.write("除外メソッド:\n\t%s" % self.except_testCaseNames)
 
-			# エラー発生時それ以降のテストケースをパスする。
-			if errorstop and self.errors :
-				self.stop_profiling()
-			# テスト結果の保存と更新
-			self.update_processiong_info(processed,skipped)
+		# エラー発生時それ以降のテストケースをパスする。
+		if errorstop and self.errors:
+			self.stop_profiling()
+		# テスト結果の保存と更新
+		self.update_processiong_info(processed,skipped)
 
-	
+
 	def update_processiong_info(self,processed,skipped):
 		"""テスト処理数についての総合情報の更新"""
 		self.comprehenive_processed += processed
@@ -206,34 +207,19 @@ class Test_Profiler(object):
 		print "Passed: %d  Error: %d  Skipped: %d" % (numof_processed-numof_errors, numof_errors,numof_skipped)
 
 
-	# Extraction and Creation and Orger-Resolution of Test-Methods
-	def generate_ordered_tests(self):
+	# Extraction and Settings of Test-Methods
+	def extractTestMethodNames(self,testCaseClass,bases=None):
 		"""
-		順序解決されたテスト名のリストを返す。
+		テスト対象となるメソッドの抽出機
+		unittest.testLoaderを用いる。
 		"""
-		#順序解決
-		def resolve_order(test):
-			if hasattr(test,"beforeOf") :
-				for test_afterward_this in test.beforeOf :
-					ordered_testnames.remove(test_afterward_this)
-					ordered_testnames.insert(ordered_testnames.index(test.__name__)+1,test_afterward_this) #testを対象テストの後に
+		testLoader = unittest.TestLoader()
+        	testCaseNames = testLoader.getTestCaseNames(testCaseClass)
+        	except_testCaseNames = testLoader.getTestCaseNames(bases) if bases is not None else []
 
-		#テストの抽出
-		tests = [ self.testname2method(testname) for testname in self.filtered_names ]
-
-		#テストの順序解決
-		#after要素の変換と名前衝突のチェック
-		filter(self.after2before,tests) #after要素をbefore要素に変換
-		filter(self.check_order_fliction,tests) #すべてのテストについて順序衝突が起こっていないかチェック
-		# beforeOf 要素内のテスト名のチェック
-		for test in tests :
-			hasattr(test,"beforeOf") and filter(self.testname2method,test.beforeOf)
-				
-		#順序解決
-		ordered_testnames = list(self.filtered_names) #順序付けられた名前リスト
-		filter(resolve_order,tests)
-
-		return ordered_testnames
+		inExceptNames = ( lambda methodname : methodname not in except_testCaseNames )
+        	filtered_names = filter(inExceptNames,testCaseNames)
+        	return filtered_names,except_testCaseNames
 
 	def testname2method(self,testname):
 		"""
@@ -272,7 +258,7 @@ class Test_Profiler(object):
 
 			#テスト失敗時、それを出力してテストエラーリストに情報を保管する。
 			except Exception as e :
-				print "%s : Test Failed\\" % testfunc_name
+				print "%s : Failed\\" % testfunc_name
 				# エラーに関する情報の設定と格納 
 				e.test_name = testfunc_name
 				e.exc_type = e.__class__.__name__
@@ -282,28 +268,52 @@ class Test_Profiler(object):
 				print "%s : Passed\\" % testfunc_name
 			finally :
 				#順序に関する情報
-				if hasattr(testmethod,"beforeOf") :
-					print "    ( before of  '%s' )" % " , '".join(testmethod.beforeOf)
-				else :
+				has_beforeOf = hasattr(testmethod,"beforeOf_preseted")
+				has_afterOf = hasattr(testmethod,"afterOf_preseted")
+				if has_beforeOf :
+					print "\t( before '%s' )" % " , '".join(testmethod.beforeOf_preseted)
+				if has_afterOf :
+					print "\t( after '%s' )" % " ,' ".join(testmethod.afterOf_preseted)
+				if not any([
+					has_beforeOf,has_afterOf
+					]) :
 					print ""
 
 		return result_report_wrapper
 
-	def extractTestMethodNames(self,testCaseClass,bases=None):
-		"""
-		テスト対象となるメソッドの抽出機
-		unittest.testLoaderを用いる。
-		"""
-		testLoader = unittest.TestLoader()
-        	testCaseNames = testLoader.getTestCaseNames(testCaseClass)
-        	except_testCaseNames = testLoader.getTestCaseNames(bases) if bases is not None else []
-
-		inExceptNames = ( lambda methodname : methodname not in except_testCaseNames )
-        	filtered_names = filter(inExceptNames,testCaseNames)
-        	return filtered_names,except_testCaseNames
-
 
         # Order Resolution
+	def generate_ordered_tests(self):
+		"""
+		順序解決されたテスト名のリストを返す。
+		"""
+		#順序解決
+		def resolve_order(test):
+			if not hasattr(test,"beforeOf") :
+				return
+			for test_afterward_this in test.beforeOf :
+				#起点となるテストより"前"にafterward_testsが定義されていれば順序を変更しなければならない
+				if ordered_testnames.index(test_afterward_this) < ordered_testnames.index(test.__name__) :
+					ordered_testnames.remove(test_afterward_this)
+					ordered_testnames.insert(ordered_testnames.index(test.__name__)+1,test_afterward_this) # afterward_testをtestの後ろに
+
+		#テストの抽出
+		tests = [ self.testname2method(testname) for testname in self.filtered_names ]
+
+		#テストの順序解決
+		#after要素の変換と名前衝突のチェック
+		filter(self.after2before,tests) #after要素をbefore要素に変換
+		filter(self.check_order_fliction,tests) #すべてのテストについて順序衝突が起こっていないかチェック
+		# beforeOf 要素内のテスト名のチェック
+		for test in tests :
+			hasattr(test,"beforeOf") and filter(self.testname2method,test.beforeOf)
+				
+		#順序解決
+		ordered_testnames = list(self.filtered_names) #順序付けられた名前リスト
+		filter(resolve_order,tests)
+
+		return ordered_testnames
+
         def after2before(self,testmethod):
         	"""
         	テストメソッドを引数にとって、そのオブジェクトに設定されたテスト順序情報afterを順序指定先テストメソッドのbeforeに変換する。
@@ -333,18 +343,17 @@ class Test_Profiler(object):
 				#順序衝突
 				if afterward_test in order_list :
 					message = \
-						"順序衝突が検出されました。\n"\
-						"\t %s は順序衝突しています。\n" % (afterward_test)\
-						+"\t" + " -> ".join(order_list+[afterward_test])
+						"順序衝突が検出されました。\n\n"\
+						+"衝突順序関係 : before -> after\n"\
+						+"\t"+" -> ".join(order_list +[test.__name__] +[afterward_test])
 					raise TestPreprocessError(message)
+
 				#オーダーリストに自分を追加して再帰呼び出し
 				else :
 					#自らを追加したオーダーリストのコピーを生成
-					orderlist_include_this = list(order_list + [test])
+					orderlist_include_this = list(order_list + [test.__name__])
 					#それをコンテキストに再帰呼び出し
 					self.check_order_fliction(self.testname2method(afterward_test),orderlist_include_this)
-
-		
 
 
         # Stop Profilling
@@ -361,7 +370,6 @@ class Test_Profiler(object):
 				ins = self.testCaseClass()	#引数なしで初期化
 
 			# スキップのレポート
-        		print "\n"
 			with Paragraph(Paragraph.H1,title="テストケース %d" % (self.processed_testcase+1),end_horizontal=False) as para :
 				print "対象オブジェクト:\n\t%s" % repr(ins)
 				print ""
@@ -373,36 +381,47 @@ class Test_Profiler(object):
 
 
 # Test Option Decorator
-def beforeOf(testname):
+def create_decorator(*testnames,**order) :
+	"""
+	beforeOf,afterOfデコレータの共通論理部分。
+	指定された順序の登録をクロージャーとしてデータを内包して行う、デコレーターを生成して返す
+	"""
+	# 引数チェック
+	order = order["order"]
+	assert order in ("beforeOf","afterOf")
+	filter(check_testname,testnames)
+
+	# 任意のテストメソッドを引数に取り、定義された情報に基づいて順序登録情報を修飾してそれを返すデコレータ関数
+	def decorator(test_function):
+		# 順序指定用のリストが定義されていないのなら、初期化
+		if not hasattr(test_function,order) :
+			setattr(test_function,order,[])
+			setattr(test_function,order+"_preseted",[])
+		# 順序指定するテスト名の登録 
+		for testname in testnames :
+			getattr(test_function,order).append(testname)
+			getattr(test_function,order+"_preseted").append(testname)
+		return test_function # 順序登録したテストメソッドを返す
+
+	return decorator #クロージャーとしてデータの付されたデコレーターの返却
+
+def beforeOf(*testnames):
 	"""
 	テスト名testnameを引数にとり、
 	デコレートされるテスト関数を、そのtestnameテストの「前」に実行すべきものとして定義する。
 	"""
-	check_testname(testname,error=True)
-	# Return Decorator
-	def decorator(test_function):
-		if not hasattr(test_function,"beforeOf") :
-			test_function.beforeOf = []
-		if testname not in test_function.beforeOf :
-			test_function.beforeOf.append(testname)
-		return test_function
+	if not testnames :
+		raise Exception("1つ以上のテストメソッド名を定義してください")
+	return create_decorator(*testnames,order="beforeOf")
 
-	return decorator
-
-def afterOf(testname):
+def afterOf(*testnames):
 	"""
 	テスト名testnameを引数にとり、
 	デコレートされるテスト関数を、そのtestnameテストの「後」に実行すべきものとして定義する。
 	"""
-	check_testname(testname,error=True)
-	# Return Decorator
-	def decorator(test_function):
-		if not hasattr(test_function,"afterOf") :
-			test_function.afterOf= []
-		test_function.afterOf.append(testname)
-		return test_function
-
-	return decorator
+	if not testnames :
+		raise Exception("1つ以上のテストメソッド名を定義してください")
+	return create_decorator(*testnames,order="afterOf")
 
 
 # Util
@@ -433,6 +452,7 @@ class Paragraph(object):
 
 		#水平線に関する情報
 		self.width = width
+		self.br = "\n" *(width /30)
 		self.title = title
 		self.start_horizontal = start_horizontal
 		self.end_horizontal = end_horizontal
@@ -451,6 +471,7 @@ class Paragraph(object):
 		sys.stdout = self
 
 		#水平線の描画
+		print self.br
 		if self.start_horizontal :
 			self.write_horizontal(titled=True)
 		return self

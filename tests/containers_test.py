@@ -20,6 +20,7 @@ class ContainersTestCase(
 	"""
 	テスト用の基底クラス
 	"""
+	# Settings
 	def __init__(self,implement_type):
 		"""
 		"""
@@ -31,6 +32,8 @@ class ContainersTestCase(
 	def __repr__(self):
 		return "%s : valid_type is %s" % (self.__class__.__name__,self.get_valid_container_type().__name__)
 
+
+	#Test Methods
 	def test_add(self):
 		""" addメソッドのテスト """
 		#10回テスト
@@ -46,7 +49,7 @@ class ContainersTestCase(
 				contained = Contained()
 				self.add_method(self,contained)
 				self.containeds.append(contained)
-
+	
 	def test_add_fail(self):
 		"""addの失敗テスト"""
 		#不正な型オブジェクトの代入
@@ -60,13 +63,16 @@ class ContainersTestCase(
 	@afterOf("test_add")
 	def test_remove(self):
 		"""removeメソッドのテスト"""
-		if not self.get_children() :
-			raise TestOrderError("このメソッドはaddテストのあとに呼ばれなければなりません")
-
 		#すべての要素を取り除く
-		for child in self :
-			self.remove(child)
+		if self.get_valid_container_type() == Single_Container :
+			self.remove(self.get_children())
+		else :
+			for child in list(self.get_children()) :
+				self.remove(child)
 		self.assertFalse(self.get_children())
+
+	def test_iterable(self):
+		pass
 
 
 def testcase_generator():
