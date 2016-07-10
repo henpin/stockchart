@@ -292,6 +292,8 @@ class Single_Container(Base_Container):
 
 	def set_child(self,content):
 		"""子containedオブジェクトを定義、格納する。"""
+		if self.get_children() :
+			self.remove(self._child)	#子を破棄
 		self.is_valid_container_type(Single_Container)
 		self.test_child(content)
 		self._child = content
@@ -305,12 +307,15 @@ class Single_Container(Base_Container):
 		"""
 		return self._child
 
-	def _remove(self,child):
+	def _remove(self,child=None):
 		"""
 		コンテナ多様性のために隠蔽されたremoveメソッド。
 		Base_Containerのremoveから連鎖的に呼び出される。
 		"""
-		if child is self._child :
+		if self.get_children() is None :
+			raise Exception("すでに子要素は存在しません")
+
+		if child is self._child:
 			self._child = None
 		else :
 			raise Exception("Single_Container: 引数Childはこのオブジェクトの子Containedオブジェクトでありません.")

@@ -26,18 +26,48 @@ class ContainersTestCase(
 		implement_type.__init__(self)
 		self.set_valid_container_type(implement_type)
 		self.add_method = implement_type._add
-		self.container_contained_table = {}
+		self.containeds = []
+
+	def __repr__(self):
+		return "%s : valid_type is %s" % (self.__class__.__name__,self.get_valid_container_type().__name__)
 
 	def test_add(self):
+		""" addメソッドのテスト """
+		#10回テスト
+		for i in range(10) :
+			# Container of Container
+			if self.get_valid_container_type() is Container_Of_Container :
+				containeds = (Single_Container(),Plural_Container(),Container_Of_Container())
+				for contained in containeds :
+					self.add_method(self,contained)
+					self.containeds.append(contained)
+			#その他コンテナオブジェクト
+			else :
+				contained = Contained()
+				self.add_method(self,contained)
+				self.containeds.append(contained)
+
+	def test_add_fail(self):
+		"""addの失敗テスト"""
+		#不正な型オブジェクトの代入
 		for error_obj in RANDOM_BUILTIN_OBJECTS :
 			self.assertRaises(TypeError,self.add_method,(self,error_obj))
-		for i in range(10):
-			contained = Contained()
-			if self.get_valid_container_type() is Container_Of_Container :
-				self.assertRaises(TypeError,self.add_method,(self,contained))
-			else :
-				self.add_method(self,contained)
-			self.container_contained_table[self.get_valid_container_type] = contained 
+		#コンテナコンテイナーに非コンテナオブジェクトの代入
+		contained = Contained()
+		if self.get_valid_container_type() is Container_Of_Container :
+			self.assertRaises(TypeError,self.add_method,(self,contained))
+
+	@afterOf("test_add")
+	def test_remove(self):
+		"""removeメソッドのテスト"""
+		if not self.get_children() :
+			raise TestOrderError("このメソッドはaddテストのあとに呼ばれなければなりません")
+
+		#すべての要素を取り除く
+		for child in self :
+			self.remove(child)
+		self.assertFalse(self.get_children())
+
 
 def testcase_generator():
 	for implement_type in IMPLEMENT_CONTAINER_TYPE :
@@ -46,10 +76,7 @@ def testcase_generator():
 
 
 if __name__ == '__main__':
-	test_monitor = Test_Profiler(ContainersTestCase,Base_Container)
-	for testcase in testcase_generator() :
-		test_monitor.test(testcase)
-	test_monitor.report_result()
-
-
+	with Test_Profiler(ContainersTestCase,Base_Container) as test_profiler :
+		for testcase in testcase_generator() :
+			test_profiler.test(testcase)
 
