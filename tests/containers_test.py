@@ -71,8 +71,17 @@ class ContainersTestCase(
 				self.remove(child)
 		self.assertFalse(self.get_children())
 
+	@afterOf("test_add")
+	@beforeOf("test_remove")
 	def test_iterable(self):
-		pass
+		""" イテレートテスト """
+		if self.get_valid_container_type() is Single_Container :
+			with self.assertRaises(TypeError) :
+				for Nouse in self :
+					pass
+		else :
+			for contained in self :
+				pass
 
 
 def testcase_generator():

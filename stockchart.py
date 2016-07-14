@@ -1883,25 +1883,25 @@ class Stock_Chart(Content):
 		#定義されたダウンロードモードに基づく処理の分岐
 		#ローカルモード
 		if self.download_mode is DOWNLOAD_MODE_LOCAL :
-			result = self.download_price_data_from_file() :
+			result = self.download_price_data_from_file()
 
 		#オートモード:ローカルにファイルがあればそのデータを使い、さもなくばフェッチする。
 		elif self.download_mode is DOWNLOAD_MODE_AUTO :
 			if self.exist_stock_price_file() :
-				result = self.download_price_data_from_file() :
+				result = self.download_price_data_from_file()
 			else :
-				result = self.download_price_data_from_web() :
+				result = self.download_price_data_from_web()
 
 		#差分ダウンロード:ファイルが存在し、且つ最新の状態ならそれを用い、さもなくばwebからダウンロード。
 		elif self.download_mode is DOWNLOAD_MODE_DIFF :
 			if self.exist_stock_price_file(check_latest=True) :
-				result = self.download_price_data_from_file() :
+				result = self.download_price_data_from_file()
 			else :
-				result = self.download_price_data_from_web() :
+				result = self.download_price_data_from_web()
 
 		#強制ダウンロードモード。
 		elif self.download_mode is DOWNLOAD_MODE_DOWNLOAD :
-			result = self.download_price_data_from_web() :
+			result = self.download_price_data_from_web()
 
 		#エラー
 		else :
@@ -2816,7 +2816,7 @@ class Stock_Chart(Content):
 
 		return pygame.transform.flip(surface,False,True)
 
-"""書き換え必須
+	#書き換え必須 ----------------------------------------------------------------------------------------------------------------------
 	def draw_y_axis(self,surface_size,font):
 		"""
 		日時を表す縦線描画のための中間インターフェイス。
@@ -2845,6 +2845,7 @@ class Stock_Chart(Content):
 		月単位で縦線を描く
 		"""
 		def is_beginning_day(date):
+			pass
 			
 
 		if self.get_zoom_scale() >= 1.5 :
@@ -2955,7 +2956,7 @@ class Stock_Chart(Content):
 			#分足については「Y,M,D,H,M」の５つの要素を返す
 			date_str_list = self.stock_price_list[index][0].replace(":","-").split("-")
 			return map ( int,date_str_list )
-"""
+	#書き換え必須  ここまで----------------------------------------------------------------------------------------------------------------------
 
 	def pricetype2index(self,price_type):
 		"""
