@@ -30,7 +30,7 @@ class ContainersTestCase(
 		self.containeds = []
 
 	def __repr__(self):
-		return "%s : valid_type is %s" % (self.__class__.__name__,self.get_valid_container_type().__name__)
+		return "%s ( valid_type is %s )" % (self.__class__.__name__,self.get_valid_container_type().__name__)
 
 
 	#Test Methods
@@ -83,15 +83,14 @@ class ContainersTestCase(
 			for contained in self :
 				pass
 
-
 def testcase_generator():
 	for implement_type in IMPLEMENT_CONTAINER_TYPE :
 		testcase = ContainersTestCase(implement_type)
-		yield testcase
+		yield testcase,implement_type
 
 
 if __name__ == '__main__':
-	with Test_Profiler(ContainersTestCase,Base_Container) as test_profiler :
-		for testcase in testcase_generator() :
-			test_profiler.test(testcase)
+	with Test_Profiler(ContainersTestCase) as test_profiler :
+		for testcase,implement_type in testcase_generator() :
+			test_profiler.test(testcase,(implement_type,Base_Container))
 
