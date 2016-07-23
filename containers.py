@@ -69,6 +69,7 @@
 	7, 被コンテナ型は、get_parent()あるいはget_father()を有する。これによって親コンテナオブジェクトを取り出せる。
 """
 
+# Contained
 class Contained(object):
 	"""
 	コンテナオブジェクトの子オブジェクト(=被コンテイン型)となる型のインターフェイス
@@ -107,11 +108,14 @@ class Contained(object):
 		return parent if parent.get_father() is None else parent.get_father()
 
 
+
+# Base-Container
 class Base_Container(Contained):
 	"""
 	コンテナオブジェクトの最小抽象基底クラス。
 	すべてのコンテナオブジェクトは、被コンテナでもある。つまり、この最小基底クラスはContainedを継承する。
 	"""
+	# Initialize
 	def __init__(self):
 		"""
 		すべてのコンテナ実装型がこの初期化ルーチンを呼ばなくてはならない。
@@ -129,6 +133,8 @@ class Base_Container(Contained):
 		#initial subroutine
 		self.set_valid_container_type()	#有効実装型の初期設定。２つ以上の実装型が継承されているときには未定義にしておく
 	
+
+	# Protocols
 	def __iter__(self):
 		"""
 		イテラブルにします。
@@ -139,6 +145,8 @@ class Base_Container(Contained):
 		self.test_valid_container_type()	#有効コンテナ型が定義済か確認
 		return iter(self.get_children())
 
+	
+	# Get Children
 	def get_children(self):
 		"""
 		オーバーライド禁止。連鎖的に然るべきオブジェクトの隠蔽された_get_children()を呼ぶ。
@@ -152,6 +160,8 @@ class Base_Container(Contained):
 		"""
 		raise Exception("オーバーライド必須です")
 
+
+	# Add/Remove Childen
 	def add(self,child):
 		"""
 		オーバーライド禁止。連鎖的に然るべきオブジェクトの隠蔽された_add()を呼ぶ。
@@ -178,6 +188,8 @@ class Base_Container(Contained):
 		self.get_valid_container_type()._remove(self,child)
 		Contained._remove_parent(child)
 
+
+	# Check TypeOf Children
 	def test_child(self,child,implement_type=None):
 		"""
 		与えられた引数childがこのContainerに適合する型であるかを判別し、そうでないならエラーを送出します。
@@ -190,6 +202,8 @@ class Base_Container(Contained):
 
 		return True
 
+
+	# Check self-implementType
 	def test_valid_container_type(self):
 		"""
 		ちゃんと有効コンテナ型が定義されているか確認するユーティリティ
@@ -197,31 +211,75 @@ class Base_Container(Contained):
 		if self.valid_container_type is None :
 			raise Exception("有効コンテナ型が未定義です。")
 
+	def is_valid_container_type(self,container_type,error=True):
+		"""
+		有効コンテナ型かどうか。
+		この基底オブジェクトの外部から呼ばれる
+		"""
+		self.test_valid_container_type()	#そもそも、ちゃんと定義済かどうかのチェック
+		if self.valid_container_type is container_type :
+			return True
+		elif error :
+			raise TypeError("%sは有効コンテナ型ではありません。" % container_type)
+		else :
+			return False
+
+
+	# Children's-Validtype Settings
+	VALIDTYPE_OPARETEMETHODS =\
+		VALIDTYPE_OPARETE_METHOD_ADD ,VALIDTYPE_OPARETE_METHOD_REMOVE ,VALIDTYPE_OPARETE_METHOD_RESET = (object() ,object() ,object())
+	def operate_valid_type(self,operate_method,valid_type,implement_type=None):
+		"""
+		被格納有効型の設定に関する共通ロジック
+		操作Operationを引数にとり、実際の操作を定義する
+		"""
+		#引数チェック
+		assert ( operate_method in self.VALIDTYPE_OPARETEMETHODS )
+		# 定義された実装型のチェック
+		if implement_type is None :
+			self.test_valid_container_type()
+			implement_type = self.get_valid_container_type()
+		if implement_type is Container_Of_Container and valid_type is not Base_Container :
+			raise NotImplementedError("Container_Of_Containerオブジェクトのvalid_typeは操作不能です")
+		# valid_typeのチェック
+		if operate_method is not self.VALIDTYPE_OPARETE_METHOD_RESET : 	#リセットならvalid_typeのチェックは行わない
+			#引数がタプルなら要素ごとの再起呼び出しを行い、あるいは型オブジェクトでなければ例外を送出
+			recall = ( lambda val : self.operate_valid_type(operate_method=operate_method,valid_type=val,implement_type=implement_type) )
+			if isinstance(valid_type,tuple) :
+				map(recall,valid_type)
+			elif type(valid_type) is not type :
+				raise TypeError("引数 %s は(少なくとも'新型'の)型オブジェクトでありません" % (valid_type))
+
+		# Do Operation
+		if operate_method is self.VALIDTYPE_OPARETE_METHOD_ADD :
+			self.valid_types[implement_type].append(valid_type)
+		elif operate_method is self.VALIDTYPE_OPARETE_METHOD_REMOVE :
+			self.valid_types[implement_type].remove(valid_type)
+		elif operate_method is self.VALIDTYPE_OPARETE_METHOD_RESET :
+			self.valid_types[implement_type] = list()
+			
+
 	def add_valid_type(self,valid_type,implement_type=None):
 		"""
 		子オブジェクトの型指定を行う。
 		引数には型オブジェクトかあるいは、そのタプルをとる。
 		"""
-		#旧型クラスのダミー。クラスオブジェクトであるかどうかを確認する為
-		class OldStyleClass :
-			pass
+		self.operate_valid_type(self.VALIDTYPE_OPARETE_METHOD_ADD,valid_type,implement_type)
 
-		#引数調整
-		if implement_type is None :
-			implement_type = self.get_valid_container_type()
-			if implement_type is None :
-				raise Exception(
-				"格納する子オブジェクトの型指定について、それを設定するコンテナ型が引数に定義されておらず、かつ有効実装型も未定義です。")
+	def set_type_invalid(self,valid_type,implement_type=None):
+		""" 現在定義されている有効型のセットから、定義された型を取り除く """
+		self.operate_valid_type(self.VALIDTYPE_OPARETE_METHOD_REMOVE,valid_type,implement_type)
 
-		#引数がタプルなら要素ごとの再起呼び出しを行い、あるいは型オブジェクトでなければ例外を送出
-		if isinstance(valid_type,tuple) :
-			for each_type in valid_type :
-				self.add_valid_type(each_type)
-		elif type(valid_type) is not type and type(valid_type) is not type(OldStyleClass) :
-			raise TypeError("型オブジェクトでありません")
-		else :
-			self.valid_types[implement_type].append(valid_type)	#登録
+	def reset_validtypes(self,implement_type=None):
+		""" 定義された有効被コンテナ実装型のリセット """
+		self.operate_valid_type(self.VALIDTYPE_OPARETE_METHOD_RESET,implement_type)
+		
 
+	def get_valid_container_type(self):
+		return self.valid_container_type
+
+
+	# Setting of Valid-Container-implement-Type
 	def set_valid_container_type(self,valid_type=None):
 		"""
 		現在有効なコンテナ型を設定する。
@@ -264,25 +322,11 @@ class Base_Container(Contained):
 			set_valid_container_type_explicit()
 
 	def get_valid_types(self):
-		return self.valid_types
-	
-	def get_valid_container_type(self):
-		return self.valid_container_type
+		""" 被格納有効型のリストの取得 """
+		return self.valid_types[self.get_valid_container_type()]
 
-	def is_valid_container_type(self,container_type,error=True):
-		"""
-		有効コンテナ型かどうか。
-		この基底オブジェクトの外部から呼ばれる
-		"""
-		self.test_valid_container_type()	#そもそも、ちゃんと定義済かどうかのチェック
-		if self.valid_container_type is container_type :
-			return True
-		else :
-			if error :
-				raise TypeError("%sは有効コンテナ型ではありません。" % container_type)
-			return False
 
-		
+
 class Single_Container(Base_Container):
 	"""
 	１つの何らかのオブジェクトを「内包」するための枠組みを提供する抽象規定クラス
@@ -292,16 +336,22 @@ class Single_Container(Base_Container):
 		Base_Container.__init__(self)
 		self._child = None
 
+	# Operation of Childrens
 	def set_child(self,content):
 		"""子containedオブジェクトを定義、格納する。"""
-		if self.get_children() :
-			self.remove(self._child)	#子を破棄
+		# 有効コンテナ型および有効被コンテナ型のテスト
 		self.is_valid_container_type(Single_Container)
 		self.test_child(content)
+
+		# 要素のアップデート
+		if self.get_children() :
+			self.remove(self._child)	#子を破棄
 		self._child = content
 		content._set_container(self)
-	_add = set_child	#隠蔽されたエイリアス。
 
+
+	# Hidden InterFacese for Polymorphism
+	_add = set_child	#隠蔽されたエイリアス。
 	def _get_children(self):
 		"""
 		コンテナ多様性のために隠蔽されたget_childrenメソッド。
@@ -323,6 +373,7 @@ class Single_Container(Base_Container):
 			raise Exception("Single_Container: 引数Childはこのオブジェクトの子Containedオブジェクトでありません.")
 
 
+
 class Plural_Container(Base_Container):
 	"""
 	１つ以上の任意の個数のオブジェクトを格納するするためのコンテナオブジェクトに関する枠組みを規定する抽象規定クラス
@@ -331,14 +382,18 @@ class Plural_Container(Base_Container):
 		Base_Container.__init__(self)
 		self._children = []
 
+
+	# Operation of Childrens
 	def add_child(self,content):
 		"""子containedオブジェクトを新たに格納する"""
 		self.is_valid_container_type(Plural_Container)
 		self.test_child(content)
 		self._children.append(content)
 		content._set_container(self)
-	_add = add_child	#隠蔽されたエイリアス。
 
+
+	# Hidden InterFacese for Polymorphism
+	_add = add_child	#隠蔽されたエイリアス。
 	def _get_children(self):
 		"""
 		コンテナ多様性のために隠蔽されたget_childrenメソッド。
@@ -367,13 +422,17 @@ class Container_Of_Container(Base_Container):
 		self._child_containers = []
 		self.add_valid_type(Base_Container,Container_Of_Container)
 
+
+	# Operation of Childrens
 	def add_container(self,container):
 		self.is_valid_container_type(Container_Of_Container)
 		self.test_child(container)
 		self._child_containers.append(container)
 		container._set_container(self)
-	_add = add_container	#エイリアス
 
+
+	# Hidden InterFacese for Polymorphism
+	_add = add_container	#エイリアス
 	def _get_children(self):
 		"""
 		コンテナ多様性のために隠蔽されたget_childrenメソッド。
@@ -392,12 +451,11 @@ class Container_Of_Container(Base_Container):
 			raise Exception("Container_Of_Container: 引数Childはこのオブジェクトの子Containedオブジェクトでありません.")
 
 
+
 IMPLEMENT_CONTAINER_TYPE = (
 	Single_Container,
 	Plural_Container,
 	Container_Of_Container,
 	)#ビルトインコンテナ実装型
 
-if __name__ == '__main__' :
-	print "containers.py : コンテナオブジェクトのインターフェイス群を提供するモジュールです。"
 
