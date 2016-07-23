@@ -166,10 +166,39 @@ class ContainersTestCase(
 			self.reset_validtypes()
 			self.assertFalse(self.get_valid_types())
 
-
-	@last
+	@beforeOf("test_remove")
 	def test_switch_valid_containertype(self):
-		pass
+		""" 有効実装コンテナ型の再定義 """
+		# オリジナルな実装型
+		origin_type = self.get_valid_container_type()
+		original_children = self.get_children()
+
+		# 有効実装型の再定義時の挙動チェック
+		for implement_type in IMPLEMENT_CONTAINER_TYPE :
+			if not self.is_validtype(implement_type) :
+				# 有効実装型を再定義してサブテストの実施
+				self.containertype_polymorphism_subtest(implement_type)
+				# 最後はもとにもどす
+				self.set_valid_container_type(origin_type)
+
+		# 元の実装型の子には干渉していないはず
+		self.assertTrue(self.get_children() is original_children)
+
+	def containertype_polymorphism_subtest(self,implement_type):
+		""" test_switch_valid_containertype のテスト部分 """
+		# 実装型の再定義
+		self.set_valid_container_type(implement_type)
+
+		# 単純テスト
+		self.assertTrue( self.get_valid_container_type() is implement_type )
+		self.assertFalse( self.get_children() ) # 子要素は定義していないので0
+
+		# SubTestの実施
+		methodnames = self.extract_testnames(exclusions=(self.test_switch_valid_containertype,self.test_remove))
+		self.run_subtests(*methodnames)
+
+		# 要素の検証
+		self.assertTrue(self.get_children() is implement_type.get_children(self))
 
 
 

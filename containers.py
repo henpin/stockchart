@@ -132,6 +132,10 @@ class Base_Container(Contained):
 
 		#initial subroutine
 		self.set_valid_container_type()	#有効実装型の初期設定。２つ以上の実装型が継承されているときには未定義にしておく
+
+		#このオブジェクトが継承しているしているすべてのコンテナ実装型のinitを自動で呼び出す
+		call_init = ( lambda clsObj : clsObj.__init__(self,from_base=True) )
+		map(call_init,( baseCls for baseCls in self.__class__.mro()[1:-1] if baseCls in self.implement_types ))
 	
 
 	# Protocols
@@ -332,8 +336,9 @@ class Single_Container(Base_Container):
 	１つの何らかのオブジェクトを「内包」するための枠組みを提供する抽象規定クラス
 	「１つ以上」のオブジェクトを格納するには、このクラスの継承クラスplural_containerを用いる
 	"""
-	def __init__(self):
-		Base_Container.__init__(self)
+	def __init__(self,from_base=False):
+		if not from_base :
+			Base_Container.__init__(self)
 		self._child = None
 
 	# Operation of Childrens
@@ -378,8 +383,9 @@ class Plural_Container(Base_Container):
 	"""
 	１つ以上の任意の個数のオブジェクトを格納するするためのコンテナオブジェクトに関する枠組みを規定する抽象規定クラス
 	"""
-	def __init__(self):
-		Base_Container.__init__(self)
+	def __init__(self,from_base=False):
+		if not from_base :
+			Base_Container.__init__(self)
 		self._children = []
 
 
@@ -417,8 +423,9 @@ class Container_Of_Container(Base_Container):
 	１つ以上のコンテナオブジェクトを有するコンテナオブジェクトを定義するための抽象基底クラス。
 	機能的にはPlural_Containerのサブセットだが、コンテナ多様性のためにあえて全く別のクラスとして実装
 	"""
-	def __init__(self):
-		Base_Container.__init__(self)
+	def __init__(self,from_base=False):
+		if not from_base :
+			Base_Container.__init__(self)
 		self._child_containers = []
 		self.add_valid_type(Base_Container,Container_Of_Container)
 
