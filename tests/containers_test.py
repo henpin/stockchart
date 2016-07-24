@@ -52,8 +52,9 @@ class ContainersTestCase(
 
 		return valid_add_method
 
-
-	#Test Methods
+	
+	# Test About Add Children
+#	@begin
 	def test_add(self):
 		""" addメソッドのテスト """
 		#10回テスト
@@ -98,6 +99,8 @@ class ContainersTestCase(
 			contained = Contained()
 		self.add(contained)
 
+	
+	# Test About Remove Children
 	@afterOf("test_add")
 	def test_remove(self):
 		"""removeメソッドのテスト"""
@@ -111,6 +114,8 @@ class ContainersTestCase(
 		# 要素が0か確認
 		self.assertFalse(self.get_children())
 
+	
+	# Test About Data-Protocols
 	@afterOf("test_add")
 	@beforeOf("test_remove")
 	def test_iterable(self):
@@ -124,6 +129,8 @@ class ContainersTestCase(
 			for contained in self :
 				pass
 
+
+	# Test About Valid-Contained-Types
 	@afterOf("test_remove")
 	def test_type_refusion(self):
 		""" 被コンテナオブジェクトの有効型の定義とそれに伴う挙動のテスト """
@@ -166,6 +173,8 @@ class ContainersTestCase(
 			self.reset_validtypes()
 			self.assertFalse(self.get_valid_types())
 
+
+	# Test About ValidContainerTypes
 	@beforeOf("test_remove")
 	def test_switch_valid_containertype(self):
 		""" 有効実装コンテナ型の再定義 """
@@ -200,6 +209,25 @@ class ContainersTestCase(
 		# 要素の検証
 		self.assertTrue(self.get_children() is implement_type.get_children(self))
 
+	
+	# Test About Contained
+	@last
+	def test_contained(self):
+		""" 被格納に関するテスト """
+		# 前処理:親オブジェクトの生成
+		parent ,father = Container_Of_Container() ,Container_Of_Container()
+		father.add_container(parent)
+
+		# 親の設定とテスト
+		parent.add_container(self)
+		self.assertEqual(parent,self.get_parent())
+		self.assertEqual(father,self.get_father())
+
+		# 最後はRemove
+		parent.remove(self)
+		self.assertEqual(self.get_parent(),None)
+		self.assertEqual(self.get_father(),None)
+
 
 
 # Utils
@@ -214,7 +242,7 @@ def main():
 	""" テストを実行する """
 	with Test_Profiler(ContainersTestCase) as test_profiler :
 		for testcase,implement_type in testcase_generator() :
-			test_profiler.run_test(testcase,(implement_type,Base_Container))
+			test_profiler.run_test(testcase,(implement_type,Base_Container,Contained))
 	
 
 
