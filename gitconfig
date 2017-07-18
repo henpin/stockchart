@@ -1,0 +1,8 @@
+[user]
+	email = noname@gmail.com
+	name = YumaKaminaga
+[alias]
+	s = status
+	co = checkout
+	br = branch
+	l = log --graph
